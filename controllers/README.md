@@ -7,7 +7,7 @@ The controllers module contains the Kubernetes-style reconciliation controllers 
 Gecko controllers follow the same reconciliation loop pattern used by Kubernetes itself, built on top of [controller-runtime](https://pkg.go.dev/sigs.k8s.io/controller-runtime):
 
 1. **Watch** a resource type (e.g., `Cluster`, `NodePool`) for changes
-2. **Receive** create/update/delete events as `reconcile.Request` objects
+2. **Enqueue** a `reconcile.Request` when a create, update, or delete event occurs
 3. **Reconcile** — compare desired state (`.spec`) against current state (`.status`), take action to converge, and update status
 4. **Requeue** to retry later if the desired state isn't yet reached
 
@@ -24,13 +24,16 @@ Gecko controllers use controller-runtime's `Manager`, `Reconciler` interface, an
 graph TD
     A[Cluster CR created] --> B[placement]
     A --> C[version-resolution]
+    A --> K((Cluster Status))
 
-    B -->|PlacementResult| D[hc-controller]
-    C -->|VersionResolution| D
+    B -->|writes PlacementResult| K
+    C -->|writes VersionResolution| K
+
+    K -->|PlacementResult + VR| D[hc-controller]
 
     E[NodePool CR created] --> G[nodepoolvrresolution]
     G -->|VersionResolution| F[nodepool-controller]
-    F -.->|reads parent cluster status| B
+    F -.->|reads parent Cluster status| K
 
     D -->|Apply| H[(Firestore)]
     F -->|Apply| H
@@ -41,6 +44,7 @@ graph TD
     H -.->|GetStatus| D
     H -.->|GetStatus| F
 
+    style K fill:#f5a623,color:#fff
     style B fill:#4a90d9,color:#fff
     style C fill:#4a90d9,color:#fff
     style D fill:#e07b39,color:#fff
@@ -142,7 +146,7 @@ Controllers express intent (Apply/Read/Delete desires) in Firestore rather than 
 
 ## Directory Structure
 
-```
+```text
 controllers/
   cmd/                    # Subcommand entry points (one per controller)
   client/transport/       # Transport interface + Firestore/mock implementations
