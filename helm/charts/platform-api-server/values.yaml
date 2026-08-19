@@ -151,17 +151,43 @@ alloydb:
 # configures the deployment with the SPANNER_DATABASE env var.
 # Requires the Config Connector (cnrm.cloud.google.com) operator to be
 # installed in the cluster and the pod's service account to be bound to a
-# GCP service account with roles/spanner.databaseUser via Workload Identity.
+# GCP service account via Workload Identity.
+#
+# IAM separation: an ArgoCD PreSync Job runs DDL migrations with
+# roles/spanner.databaseAdmin using a dedicated service account, then the
+# Deployment starts with only roles/spanner.databaseUser for data-plane
+# operations. The two workloads use separate Kubernetes and GCP service
+# accounts so the long-running app never holds admin privileges.
 spanner:
   enabled: false
   projectId: ""
   instanceId: ""
   databaseId: "gecko"
-  # IAM grant on the SpannerDatabase created by this chart. When serviceAccount
-  # (the GCP service account email bound to the pod's Kubernetes service
-  # account via Workload Identity) is set, an IAMPolicyMember grants it the
-  # role below on the database. Leave serviceAccount empty to skip the grant
-  # (e.g. when IAM is managed outside this chart).
+  # Optional prefix for Spanner table names (e.g. "myapp_" creates
+  # "myapp_counters", "myapp_resources"). Must match between the migration
+  # Job and Deployment. Leave empty for no prefix.
+  tablePrefix: ""
+  # Dedicated service account for the migration PreSync Job. This KSA is
+  # bound via Workload Identity to a GCP service account with
+  # roles/spanner.databaseAdmin, separate from the Deployment's KSA.
+  migration:
+    serviceAccount:
+      create: true
+      # Name override. Defaults to "<fullname>-migrate".
+      name: ""
+      # Annotations for Workload Identity binding, e.g.:
+      #   iam.gke.io/gcp-service-account: "my-migrate-gsa@project.iam.gserviceaccount.com"
+      annotations: {}
+  # IAM grants on the SpannerDatabase created by this chart.
+  #
+  # Two separate GCP service accounts are used:
+  #   serviceAccount          - Deployment's GSA, gets databaseUser (data read/write)
+  #   migrationServiceAccount - Migration Job's GSA, gets databaseAdmin (DDL only)
+  #
+  # Leave either empty to skip the corresponding IAM grant (e.g. when IAM
+  # is managed outside this chart).
   iam:
     serviceAccount: ""
     role: "roles/spanner.databaseUser"
+    migrationServiceAccount: ""
+    migrationRole: "roles/spanner.databaseAdmin"

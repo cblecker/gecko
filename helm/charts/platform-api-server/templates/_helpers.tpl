@@ -60,6 +60,17 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Create the name of the migration service account to use
+*/}}
+{{- define "platform-api-server.migrationServiceAccountName" -}}
+{{- if .Values.spanner.migration.serviceAccount.create }}
+{{- default (printf "%s-migrate" (include "platform-api-server.fullname" .)) .Values.spanner.migration.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.spanner.migration.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
 Validate required values that must not remain as placeholders.
 */}}
 {{- define "platform-api-server.validateValues" -}}
