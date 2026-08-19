@@ -16,8 +16,9 @@ spec:
   member: {{ printf "serviceAccount:%s" .Values.spanner.iam.serviceAccount }}
   role: {{ .Values.spanner.iam.role }}
   resourceRef:
+    apiVersion: spanner.cnrm.cloud.google.com/v1beta1
     kind: SpannerDatabase
-    name: {{ .Values.spanner.databaseId }}
+    external: {{ printf "projects/%s/instances/%s/databases/%s" .Values.spanner.projectId (required "spanner.instanceId is required when spanner is enabled" .Values.spanner.instanceId) .Values.spanner.databaseId | quote }}
 {{- if .Values.spanner.iam.migrationServiceAccount }}
 ---
 # DDL admin access: the migration Job's GCP service account gets
@@ -39,8 +40,9 @@ spec:
   member: {{ printf "serviceAccount:%s" .Values.spanner.iam.migrationServiceAccount }}
   role: {{ .Values.spanner.iam.migrationRole }}
   resourceRef:
+    apiVersion: spanner.cnrm.cloud.google.com/v1beta1
     kind: SpannerDatabase
-    name: {{ .Values.spanner.databaseId }}
+    external: {{ printf "projects/%s/instances/%s/databases/%s" .Values.spanner.projectId (required "spanner.instanceId is required when spanner is enabled" .Values.spanner.instanceId) .Values.spanner.databaseId | quote }}
 ---
 # The migration Job's Spanner client also emits client-side metrics.
 apiVersion: iam.cnrm.cloud.google.com/v1beta1
