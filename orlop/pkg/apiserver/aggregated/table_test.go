@@ -5,41 +5,45 @@ import (
 	"testing"
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestCustomTableConvertor_ConvertToTable(t *testing.T) {
-	columns := []types.PrinterColumn{
-		{Name: "Available", Type: "string", JSONPath: `.status.conditions[?(@.type=="Ready")].status`},
-		{Name: "Age", Type: "date", JSONPath: `.metadata.creationTimestamp`},
-	}
-
-	convertor := NewCustomTableConvertor(
-		schema.GroupResource{Group: "test.io", Resource: "tests"},
-		columns,
-	)
-
-	// Create test object with conditions
-	testTime := "2024-01-01T00:00:00Z"
-	obj := &runtime.Unknown{}
-	objMap := map[string]interface{}{
-		"apiVersion": "test.io/v1",
-		"kind":       "Test",
-		"metadata": map[string]interface{}{
-			"name":              "test-1",
-			"creationTimestamp": testTime,
+	gr := schema.GroupResource{Group: "test", Resource: "tests"}
+	convertor := NewCustomTableConvertor(gr, []types.PrinterColumn{
+		{
+			Name:     "Available",
+			Type:     "string",
+			JSONPath: `.status.conditions[?(@.type=="Ready")].status`,
 		},
-		"status": map[string]interface{}{
-			"conditions": []interface{}{
-				map[string]interface{}{
-					"type":   "Ready",
-					"status": "True",
+		{
+			Name:     "Age",
+			Type:     "date",
+			JSONPath: `.metadata.creationTimestamp`,
+		},
+	})
+
+	testTime := "2024-01-01T00:00:00Z"
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "test/v1",
+			"kind":       "Test",
+			"metadata": map[string]interface{}{
+				"name":              "test-1",
+				"creationTimestamp": testTime,
+			},
+			"status": map[string]interface{}{
+				"conditions": []interface{}{
+					map[string]interface{}{
+						"type":   "Ready",
+						"status": "True",
+					},
 				},
 			},
 		},
 	}
-	runtime.DefaultUnstructuredConverter.FromUnstructured(objMap, obj)
 
 	table, err := convertor.ConvertToTable(context.Background(), obj, nil)
 	if err != nil {
@@ -179,4 +183,95 @@ func TestEvaluateSimpleJSONPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEmptyList(t *testing.T) {
+	gr := schema.GroupResource{Group: "test", Resource: "tests"}
+	convertor := NewCustomTableConvertor(gr, []types.PrinterColumn{
+		{Name: "Status", Type: "string", JSONPath: ".status"},
+	})
+
+	// Create empty list using unstructured
+	list := &unstructured.UnstructuredList{
+		Object: map[string]interface{}{
+			"apiVersion": "test/v1",
+			"kind":       "TestList",
+		},
+		Items: []unstructured.Unstructured{},
+	}
+
+	table, err := convertor.ConvertToTable(context.Background(), list, nil)
+	if err != nil {
+		t.Fatalf("ConvertToTable failed for empty list: %v", err)
+	}
+
+	if len(table.Rows) != 0 {
+		t.Errorf("expected 0 rows for empty list, got %d", len(table.Rows))
+	}
+
+	if len(table.ColumnDefinitions) != 2 { // Name + Status
+		t.Errorf("expected 2 column definitions, got %d", len(table.ColumnDefinitions))
+	}
+}
+
+func TestFormatPreservation(t *testing.T) {
+	gr := schema.GroupResource{Group: "test", Resource: "tests"}
+	convertor := NewCustomTableConvertor(gr, []types.PrinterColumn{
+		{
+			Name:     "Count",
+			Type:     "integer",
+			Format:   "int64",
+			JSONPath: ".spec.count",
+		},
+		{
+			Name:     "Ratio",
+			Type:     "number",
+			Format:   "double",
+			JSONPath: ".spec.ratio",
+		},
+		{
+			Name:     "Created",
+			Type:     "date",
+			Format:   "date-time",
+			JSONPath: ".metadata.creationTimestamp",
+		},
+	})
+
+	table, err := convertor.ConvertToTable(context.Background(), &mockObject{
+		gvk: schema.GroupVersionKind{Group: "test", Version: "v1", Kind: "Test"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ConvertToTable failed: %v", err)
+	}
+
+	if len(table.ColumnDefinitions) != 4 { // Name + 3 custom
+		t.Fatalf("expected 4 columns, got %d", len(table.ColumnDefinitions))
+	}
+
+	// Check Format field preservation
+	if table.ColumnDefinitions[1].Format != "int64" {
+		t.Errorf("expected Count column format 'int64', got %q", table.ColumnDefinitions[1].Format)
+	}
+
+	if table.ColumnDefinitions[2].Format != "double" {
+		t.Errorf("expected Ratio column format 'double', got %q", table.ColumnDefinitions[2].Format)
+	}
+
+	if table.ColumnDefinitions[3].Format != "date-time" {
+		t.Errorf("expected Created column format 'date-time', got %q", table.ColumnDefinitions[3].Format)
+	}
+}
+
+// mockObject implements runtime.Object for testing
+type mockObject struct {
+	gvk schema.GroupVersionKind
+}
+
+func (m *mockObject) GetObjectKind() schema.ObjectKind { return m }
+func (m *mockObject) DeepCopyObject() runtime.Object   { return m }
+func (m *mockObject) SetGroupVersionKind(gvk schema.GroupVersionKind) {
+	m.gvk = gvk
+}
+func (m *mockObject) GroupVersionKind() schema.GroupVersionKind {
+	return m.gvk
 }

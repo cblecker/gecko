@@ -74,11 +74,9 @@ func (c *CustomTableConvertor) buildColumnDefinitions() []metav1.TableColumnDefi
 		def := metav1.TableColumnDefinition{
 			Name:        col.Name,
 			Type:        col.Type,
+			Format:      col.Format,
 			Description: col.Description,
 			Priority:    col.Priority,
-		}
-		if col.Type == "date" {
-			def.Format = "date-time"
 		}
 		defs = append(defs, def)
 	}
@@ -156,7 +154,8 @@ func extractItems(obj runtime.Object) ([]runtime.Object, error) {
 
 	// Check if it's a List
 	items, err := meta.ExtractList(obj)
-	if err == nil && len(items) > 0 {
+	if err == nil {
+		// Successfully extracted list (may be empty)
 		result := make([]runtime.Object, len(items))
 		for i, item := range items {
 			result[i] = item

@@ -14,6 +14,7 @@ type ParentResourceInfo struct {
 type PrinterColumn struct {
 	Name        string
 	Type        string
+	Format      string
 	JSONPath    string
 	Description string
 	Priority    int32

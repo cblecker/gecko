@@ -160,6 +160,128 @@ publicRegistry.Register(publicResources...)
 router := setupConvertingRouter(publicRegistry, privateRegistry, converter)
 ```
 
+## Printer Columns (kubectl get)
+
+### Overview
+Orlop is **not** a CRD-based API server. It's an **aggregated API server** that:
+- Private API: Uses genericapiserver (Kubernetes aggregation)
+- Public API: Uses Chi router (custom REST handlers)
+- Both expose resources without actual CRDs installed in the cluster
+
+However, we still use kubebuilder's `+kubebuilder:printcolumn` markers for developer convenience and leverage controller-gen to extract metadata.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. Source: Go Type Definitions (e.g. cluster_types.go)             │
+│    +kubebuilder:printcolumn:name="Available",type=string,...        │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. Code Generation (orlop-gen)                                      │
+│    - Runs controller-gen crd:crdVersions=v1                         │
+│    - Writes temporary CRD YAML files (Cluster.yaml, NodePool.yaml) │
+│    - Extracts AdditionalPrinterColumns from CRD spec                │
+│    - Embeds into ResourceInfo.PrinterColumns                        │
+│    - Generates zz_generated.schemas.go                              │
+│    - Deletes temporary CRD YAML files                               │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. Generated Code (zz_generated.schemas.go)                         │
+│    ClusterResourceInfo = types.ResourceInfo{                        │
+│      PrinterColumns: []types.PrinterColumn{                         │
+│        {Name: "Available", Type: "string", Format: "",              │
+│         JSONPath: `.status.conditions[?(@.type=="...")].status`},   │
+│        {Name: "Age", Type: "date", Format: "date-time", ...},       │
+│      },                                                              │
+│    }                                                                 │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. Runtime: API Server (aggregated/storage.go)                      │
+│    NewResourceStorage(resourceInfo, ...)                            │
+│    if len(resourceInfo.PrinterColumns) > 0 {                        │
+│      convertor = NewCustomTableConvertor(columns)                   │
+│    }                                                                 │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 5. Table Conversion (aggregated/table.go)                           │
+│    ConvertToTable(obj) → metav1.Table                               │
+│    - Evaluates JSONPath using k8s.io/client-go/util/jsonpath        │
+│    - Preserves native types (int, bool, time) via FindResults()     │
+│    - Builds table with Name + custom columns                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Files
+
+**Generator:**
+- `orlop/pkg/generator/schemas.go`: Runs controller-gen, extracts printer columns from temporary CRD YAML
+- `orlop/pkg/apiserver/types/types.go`: `PrinterColumn` type with Name, Type, Format, JSONPath, Description, Priority
+
+**Runtime:**
+- `orlop/pkg/apiserver/aggregated/table.go`: `CustomTableConvertor` using k8s.io/client-go/util/jsonpath
+- `orlop/pkg/apiserver/aggregated/storage.go`: Wires convertor into ResourceStorage when columns present
+
+**Generated:**
+- `platform-api/api/*/v1/zz_generated.schemas.go`: ResourceInfo with embedded PrinterColumns
+
+### Important Notes
+
+1. **No actual CRDs**: Controller-gen output is intermediate metadata only, never installed in cluster
+2. **CRD YAML is temporary**: Generated during `make generate`, immediately parsed and deleted
+3. **Format field**: Optional OpenAPI format modifier (int64, double, date-time). Currently only date columns get format auto-populated by controller-gen. For explicit formats on integer/number columns, add `format=int64` to kubebuilder marker when needed.
+4. **JSONPath library**: Uses k8s.io/client-go/util/jsonpath (battle-tested, full spec support) instead of custom parser
+5. **Type preservation**: JSONPath values returned via `FindResults()` preserve native Go types (int, bool, time.Time)
+
+### Example
+
+**Source:**
+```go
+// +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+type Cluster struct {
+    ...
+}
+```
+
+**Generated CRD YAML (temporary):**
+```yaml
+spec:
+  versions:
+  - name: v1
+    additionalPrinterColumns:
+    - name: Available
+      type: string
+      jsonPath: .status.conditions[?(@.type=="Ready")].status
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+```
+
+**Generated Go (permanent):**
+```go
+var ClusterResourceInfo = types.ResourceInfo{
+    PrinterColumns: []types.PrinterColumn{
+        {Name: "Available", Type: "string", JSONPath: `.status.conditions[?(@.type=="Ready")].status`},
+        {Name: "Age", Type: "date", Format: "date-time", JSONPath: `.metadata.creationTimestamp`},
+    },
+}
+```
+
+**kubectl output:**
+```
+NAME           AVAILABLE   AGE
+my-cluster     True        2h
+```
+
 ## Security Model
 
 ### Private API (Port 8080)

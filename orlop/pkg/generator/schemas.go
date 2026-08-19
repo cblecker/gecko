@@ -25,6 +25,7 @@ type schemaInfo struct {
 type printerColumn struct {
 	name        string
 	columnType  string
+	format      string
 	jsonPath    string
 	description string
 	priority    int32
@@ -155,6 +156,7 @@ func (g *Generator) embedSchemas(crdDir string, targetDir string) error {
 			printerCols = append(printerCols, printerColumn{
 				name:        col.Name,
 				columnType:  col.Type,
+				format:      col.Format,
 				jsonPath:    col.JSONPath,
 				description: col.Description,
 				priority:    col.Priority,
@@ -251,6 +253,9 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 				source.WriteString("\t\t{\n")
 				source.WriteString(fmt.Sprintf("\t\t\tName:        %q,\n", col.name))
 				source.WriteString(fmt.Sprintf("\t\t\tType:        %q,\n", col.columnType))
+				if col.format != "" {
+					source.WriteString(fmt.Sprintf("\t\t\tFormat:      %q,\n", col.format))
+				}
 				source.WriteString(fmt.Sprintf("\t\t\tJSONPath:    %q,\n", col.jsonPath))
 				if col.description != "" {
 					source.WriteString(fmt.Sprintf("\t\t\tDescription: %q,\n", col.description))
