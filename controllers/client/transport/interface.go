@@ -20,6 +20,10 @@ type Status struct {
 	// ResourceStatuses contains statusFeedback values keyed by resource identity then by field name.
 	// Key format: "{group}/{version}/{resource}/{namespace}/{name}"
 	ResourceStatuses map[string]map[string]string
+	// Stale is true when the status does not yet reflect the most recently
+	// written spec. Callers should requeue sooner and avoid trusting
+	// condition values until Stale becomes false.
+	Stale bool
 }
 
 // DeleteStatus holds the aggregated status of delete operations.

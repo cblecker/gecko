@@ -204,6 +204,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Infof(ctx, "nodepool reconciler: nodepool %s resources not yet applied, requeueing after %s", nodepoolID, requeuePending)
 		return reconcile.Result{RequeueAfter: requeuePending}, nil
 	}
+	if mwStatus.Stale {
+		log.Infof(ctx, "nodepool reconciler: nodepool %s status is stale, requeueing after %s", nodepoolID, requeuePending)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
+	}
 	log.Infof(ctx, "nodepool reconciler: nodepool %s reconciled, requeueing after %s", nodepoolID, requeueStable)
 	return reconcile.Result{RequeueAfter: requeueStable}, nil
 }
