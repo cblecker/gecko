@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/aggregated"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
+	"golang.org/x/net/http2"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/server/healthz"
@@ -184,8 +186,20 @@ func New(opts Options) (*Server, error) {
 		}
 
 		publicServer := &http.Server{
-			Addr:    fmt.Sprintf("%s:%d", bindAddress, opts.Public.Port),
-			Handler: publicRouter,
+			Addr:              fmt.Sprintf("%s:%d", bindAddress, opts.Public.Port),
+			Handler:           publicRouter,
+			ReadHeaderTimeout: 30 * time.Second, // prevent slow loris
+			ReadTimeout:       60 * time.Second, // max 1min per request (including watch streams)
+			WriteTimeout:      60 * time.Second, // max 1min response write (forces watch reconnect)
+			IdleTimeout:       90 * time.Second, // connection reuse between requests
+		}
+
+		// Configure HTTP/2 with keep-alive
+		http2Server := &http2.Server{
+			IdleTimeout: 90 * time.Second,
+		}
+		if err := http2.ConfigureServer(publicServer, http2Server); err != nil {
+			return nil, fmt.Errorf("failed to configure HTTP/2: %w", err)
 		}
 
 		server.publicRouter = publicRouter
