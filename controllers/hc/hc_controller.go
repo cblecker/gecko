@@ -296,7 +296,14 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 			Message:            "Resources have not been applied yet",
 			ObservedGeneration: gen,
 		})
-		return a || b
+		c := meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+			Type:               "ApiCertificateReady",
+			Status:             metav1.ConditionFalse,
+			Reason:             "ResourcesNotFound",
+			Message:            "Resources have not been applied yet",
+			ObservedGeneration: gen,
+		})
+		return a || b || c
 	}
 
 	// Derive ResourcesApplied from top-level conditions.
@@ -320,6 +327,24 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 		}
 	}
 
+	// Derive ApiCertificateReady from Certificate resource status.
+	clusterNS := fmt.Sprintf("clusters-%s", cluster.Name)
+	certKey := transport.ResourceKey("cert-manager.io", "v1", "certificates", clusterNS, "external-api-cert")
+	certStatus := string(metav1.ConditionFalse)
+	certReason := "CertificateNotReady"
+	certMessage := ""
+	if certFeedback, ok := mwStatus.ResourceStatuses[certKey]; ok {
+		if v, ok := certFeedback["readyCondition"]; ok {
+			// Validate condition value - only accept True/False/Unknown
+			if v == string(metav1.ConditionTrue) || v == string(metav1.ConditionFalse) || v == string(metav1.ConditionUnknown) {
+				certStatus = v
+				if v == string(metav1.ConditionTrue) {
+					certReason = "CertificateReady"
+				}
+			}
+		}
+	}
+
 	a := meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 		Type:               "ResourcesApplied",
 		Status:             metav1.ConditionStatus(appliedStatus),
@@ -331,6 +356,13 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 		Type:               "HostedClusterAvailable",
 		Status:             metav1.ConditionStatus(availableStatus),
 		Reason:             "HostedClusterAvailable",
+		ObservedGeneration: gen,
+	})
+	d := meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+		Type:               "ApiCertificateReady",
+		Status:             metav1.ConditionStatus(certStatus),
+		Reason:             certReason,
+		Message:            certMessage,
 		ObservedGeneration: gen,
 	})
 
@@ -349,7 +381,7 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 		}
 	}
 
-	return a || b || c
+	return a || b || c || d
 }
 
 // firstCondition returns the status, reason, and message of the first condition matching condType.
