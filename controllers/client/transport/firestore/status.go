@@ -83,6 +83,7 @@ func aggregateConditions(desires []kubeapplier.ApplyDesire) []metav1.Condition {
 // per-resource status fields keyed by resource identity string.
 // For HostedCluster resources it extracts: availableCondition, controlPlaneEndpoint, version.
 // For NodePool resources it extracts: readyCondition, allNodesHealthyCondition.
+// For Certificate resources it extracts: readyCondition.
 // Other resources: empty inner map (no known fields to extract).
 func extractResourceStatuses(reads []kubeapplier.ReadDesire) (map[string]map[string]string, error) {
 	result := make(map[string]map[string]string, len(reads))
@@ -102,6 +103,8 @@ func extractResourceStatuses(reads []kubeapplier.ReadDesire) (map[string]map[str
 			fields, err = extractHCFields(rd.Status.KubeContent.Raw)
 		case ref.Resource == "nodepools" && ref.Group == constants.HyperShiftGroup:
 			fields, err = extractNPFields(rd.Status.KubeContent.Raw)
+		case ref.Resource == "certificates" && ref.Group == "cert-manager.io":
+			fields, err = extractCertFields(rd.Status.KubeContent.Raw)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("extract resource status %s: %w", key, err)
@@ -185,6 +188,33 @@ func extractNPFields(raw []byte) (map[string]string, error) {
 			fields["readyCondition"] = c.Status
 		case "AllNodesHealthy":
 			fields["allNodesHealthyCondition"] = c.Status
+		}
+	}
+
+	return fields, nil
+}
+
+// extractCertFields extracts Certificate status fields from raw live-object JSON.
+//   - readyCondition: .status.conditions[type=Ready].status
+func extractCertFields(raw []byte) (map[string]string, error) {
+	fields := map[string]string{}
+
+	var obj struct {
+		Status struct {
+			Conditions []struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			} `json:"conditions"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("unmarshal Certificate live object: %w", err)
+	}
+
+	for _, c := range obj.Status.Conditions {
+		if c.Type == "Ready" {
+			fields["readyCondition"] = c.Status
+			break
 		}
 	}
 
