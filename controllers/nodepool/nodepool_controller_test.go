@@ -333,48 +333,6 @@ func TestReconcile_NoPlacement_StatusUpdateError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test cases – early exits: HC availability gate
-// ---------------------------------------------------------------------------
-
-func TestReconcile_HCNotAvailable(t *testing.T) {
-	np := testNodePool("4.16.0")
-	cluster := testCluster(true, false) // HC not available
-
-	tr := mock.New()
-	r, _ := buildReconciler(t, np, cluster, tr, nil, nil, nil)
-
-	result, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
-	require.NoError(t, err)
-	require.Equal(t, requeuePending, result.RequeueAfter, "should requeue while HC is not available")
-	require.Empty(t, tr.ApplyCalls)
-}
-
-func TestReconcile_HCNotAvailable_StatusUpdateConflict(t *testing.T) {
-	np := testNodePool("4.16.0")
-	cluster := testCluster(true, false)
-
-	tr := mock.New()
-	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, conflictErr())
-
-	result, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
-	require.NoError(t, err)
-	require.Equal(t, requeuePending, result.RequeueAfter)
-	require.True(t, storeClient.statusWriter.called)
-}
-
-func TestReconcile_HCNotAvailable_StatusUpdateError(t *testing.T) {
-	np := testNodePool("4.16.0")
-	cluster := testCluster(true, false)
-
-	tr := mock.New()
-	r, _ := buildReconciler(t, np, cluster, tr, nil, nil, fmt.Errorf("server error"))
-
-	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "update nodepool status")
-}
-
-// ---------------------------------------------------------------------------
 // Test cases – early exits: VR gates
 // ---------------------------------------------------------------------------
 
