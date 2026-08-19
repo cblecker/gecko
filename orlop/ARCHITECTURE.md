@@ -172,7 +172,7 @@ However, we still use kubebuilder's `+kubebuilder:printcolumn` markers for devel
 
 ### Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 1. Source: Go Type Definitions (e.g. cluster_types.go)             │
 │    +kubebuilder:printcolumn:name="Available",type=string,...        │
@@ -204,9 +204,9 @@ However, we still use kubebuilder's `+kubebuilder:printcolumn` markers for devel
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 4. Runtime: API Server (aggregated/storage.go)                      │
-│    NewResourceStorage(resourceInfo, ...)                            │
-│    if len(resourceInfo.PrinterColumns) > 0 {                        │
-│      convertor = NewCustomTableConvertor(columns)                   │
+│    NewResourceStorage(..., printerColumns, ...)                     │
+│    if len(printerColumns) > 0 {                                     │
+│      convertor = NewCustomTableConvertor(gr, printerColumns)        │
 │    }                                                                 │
 └──────────────────────────────┬──────────────────────────────────────┘
                                │
@@ -238,7 +238,7 @@ However, we still use kubebuilder's `+kubebuilder:printcolumn` markers for devel
 1. **No actual CRDs**: Controller-gen output is intermediate metadata only, never installed in cluster
 2. **CRD YAML is temporary**: Generated during `make generate`, immediately parsed and deleted
 3. **Format field**: Optional OpenAPI format modifier (int64, double, date-time). Currently only date columns get format auto-populated by controller-gen. For explicit formats on integer/number columns, add `format=int64` to kubebuilder marker when needed.
-4. **JSONPath library**: Uses k8s.io/client-go/util/jsonpath (battle-tested, full spec support) instead of custom parser
+4. **JSONPath library**: Uses k8s.io/client-go/util/jsonpath (Kubernetes JSONPath dialect with filter support) instead of custom parser
 5. **Type preservation**: JSONPath values returned via `FindResults()` preserve native Go types (int, bool, time.Time)
 
 ### Example
@@ -277,7 +277,7 @@ var ClusterResourceInfo = types.ResourceInfo{
 ```
 
 **kubectl output:**
-```
+```text
 NAME           AVAILABLE   AGE
 my-cluster     True        2h
 ```
