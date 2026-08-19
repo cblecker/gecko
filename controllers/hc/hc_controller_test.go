@@ -768,7 +768,7 @@ func TestReconcile_StatusUpdateError_ReturnsError(t *testing.T) {
 
 // TestReconcile_StaleStatus_RequeuesPending verifies that when the transport
 // reports stale status, the reconciler requeues with the pending interval even
-// though resources are applied.
+// though resources are applied, and does not write stale conditions.
 func TestReconcile_StaleStatus_RequeuesPending(t *testing.T) {
 	clusterID := "cluster-abc"
 	mcName := "mc-cluster-1"
@@ -783,11 +783,14 @@ func TestReconcile_StaleStatus_RequeuesPending(t *testing.T) {
 		Stale: true,
 	}
 
-	r, _ := buildReconciler(t, cluster, nil, tr, nil)
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil)
 
 	result, err := r.Reconcile(context.Background(), clusterReq(clusterID))
 	require.NoError(t, err)
 	require.Equal(t, 15*time.Second, result.RequeueAfter)
+
+	// Verify that stale status was not written to the cluster conditions.
+	require.Nil(t, storeClient.statusWriter.captured, "status should not be updated when status is stale")
 }
 
 // ---------------------------------------------------------------------------

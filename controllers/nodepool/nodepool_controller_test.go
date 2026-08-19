@@ -731,11 +731,14 @@ func TestReconcile_StaleStatus_RequeuesPending(t *testing.T) {
 		Stale: true,
 	}
 
-	r, _ := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
 
 	result, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
 	require.NoError(t, err)
 	require.Equal(t, requeuePending, result.RequeueAfter)
+
+	// Verify that stale status was not written to the nodepool conditions.
+	require.Nil(t, storeClient.statusWriter.captured, "status should not be updated when status is stale")
 }
 
 // ---------------------------------------------------------------------------
