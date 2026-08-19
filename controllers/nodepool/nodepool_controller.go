@@ -104,17 +104,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{RequeueAfter: requeuePending}, nil
 	}
 
-	// Gate: HC must be Available (HostedClusterAvailable condition on the cluster).
-	if !meta.IsStatusConditionTrue(cluster.Status.Conditions, "HostedClusterAvailable") {
-		if setWaitingNPConditions(&np, "HostedClusterNotAvailable", "Waiting for HostedCluster to become available") {
-			if err := r.client.Status().Update(ctx, &np); err != nil && !apierrors.IsConflict(err) {
-				return reconcile.Result{}, fmt.Errorf("nodepool reconciler: update nodepool status: %w", err)
-			}
-		}
-		log.Infof(ctx, "hc not available for nodepool %s, requeueing after %s", nodepoolID, requeuePending)
-		return reconcile.Result{RequeueAfter: requeuePending}, nil
-	}
-
 	// Gate: nodepool VR must be ready.
 	if np.Status.VersionResolution == nil || np.Status.VersionResolution.ReleaseVersion == "" {
 		if setWaitingNPConditions(&np, "VersionResolutionNotReady", "Waiting for nodepool version resolution") {
