@@ -186,7 +186,7 @@ func New(c CompletedConfig) (*AggregatedServer, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to create store for %s: %w", info.Plural, err)
 				}
-				resourceStorage := NewResourceStorage(store, strategy, info.GVK, info.Plural, info.Singular, scheme, c.Logger.WithValues("resource", info.Plural))
+				resourceStorage := NewResourceStorage(store, strategy, info.GVK, info.Plural, info.Singular, scheme, c.Logger.WithValues("resource", info.Plural), info.PrinterColumns)
 				storageMap[info.Plural] = resourceStorage
 				storageMap[info.Plural+"/status"] = NewStatusStorage(resourceStorage)
 			}

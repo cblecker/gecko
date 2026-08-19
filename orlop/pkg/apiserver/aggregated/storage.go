@@ -54,8 +54,17 @@ func NewResourceStorage(
 	plural, singular string,
 	scheme *runtime.Scheme,
 	logger logr.Logger,
+	printerColumns []types.PrinterColumn,
 ) *ResourceStorage {
 	gr := runtimeschema.GroupResource{Group: gvk.Group, Resource: plural}
+	
+	var tableConvertor rest.TableConvertor
+	if len(printerColumns) > 0 {
+		tableConvertor = NewCustomTableConvertor(gr, printerColumns)
+	} else {
+		tableConvertor = rest.NewDefaultTableConvertor(gr)
+	}
+	
 	return &ResourceStorage{
 		store:          store,
 		strategy:       strategy,
@@ -64,7 +73,7 @@ func NewResourceStorage(
 		singular:       singular,
 		scheme:         scheme,
 		groupResource:  gr,
-		tableConvertor: rest.NewDefaultTableConvertor(gr),
+		tableConvertor: tableConvertor,
 		logger:         logger,
 	}
 }

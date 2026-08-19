@@ -26,6 +26,18 @@ var ClusterResourceInfo = types.ResourceInfo{
 	Singular:   "cluster",
 	Namespaced: true,
 	SchemaYAML: ClusterSchemaYAML,
+	PrinterColumns: []types.PrinterColumn{
+		{
+			Name:        "Available",
+			Type:        "string",
+			JSONPath:    ".status.conditions[?(@.type==\"HostedClusterAvailable\")].status",
+		},
+		{
+			Name:        "Age",
+			Type:        "date",
+			JSONPath:    ".metadata.creationTimestamp",
+		},
+	},
 }
 
 // NodePoolResourceInfo describes the NodePool resource type.
@@ -35,6 +47,23 @@ var NodePoolResourceInfo = types.ResourceInfo{
 	Singular:   "nodepool",
 	Namespaced: true,
 	SchemaYAML: NodePoolSchemaYAML,
+	PrinterColumns: []types.PrinterColumn{
+		{
+			Name:        "Available",
+			Type:        "string",
+			JSONPath:    ".status.conditions[?(@.type==\"NodePoolAvailable\")].status",
+		},
+		{
+			Name:        "Healthy",
+			Type:        "string",
+			JSONPath:    ".status.conditions[?(@.type==\"NodePoolHealthy\")].status",
+		},
+		{
+			Name:        "Age",
+			Type:        "date",
+			JSONPath:    ".metadata.creationTimestamp",
+		},
+	},
 }
 
 // GetResourceInfos returns ResourceInfo definitions for all types in this package.

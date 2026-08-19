@@ -14,11 +14,20 @@ import (
 )
 
 type schemaInfo struct {
-	typeName   string
-	plural     string
-	singular   string
-	namespaced bool
-	schema     *apiextv1.JSONSchemaProps
+	typeName       string
+	plural         string
+	singular       string
+	namespaced     bool
+	schema         *apiextv1.JSONSchemaProps
+	printerColumns []printerColumn
+}
+
+type printerColumn struct {
+	name        string
+	columnType  string
+	jsonPath    string
+	description string
+	priority    int32
 }
 
 func (g *Generator) generateSchemas(rootPath string) error {
@@ -140,12 +149,25 @@ func (g *Generator) embedSchemas(crdDir string, targetDir string) error {
 			continue
 		}
 
+		// Extract printer columns
+		var printerCols []printerColumn
+		for _, col := range version.AdditionalPrinterColumns {
+			printerCols = append(printerCols, printerColumn{
+				name:        col.Name,
+				columnType:  col.Type,
+				jsonPath:    col.JSONPath,
+				description: col.Description,
+				priority:    col.Priority,
+			})
+		}
+
 		schemas = append(schemas, schemaInfo{
-			typeName:   crd.Spec.Names.Kind,
-			plural:     crd.Spec.Names.Plural,
-			singular:   crd.Spec.Names.Singular,
-			namespaced: crd.Spec.Scope == apiextv1.NamespaceScoped,
-			schema:     version.Schema.OpenAPIV3Schema,
+			typeName:       crd.Spec.Names.Kind,
+			plural:         crd.Spec.Names.Plural,
+			singular:       crd.Spec.Names.Singular,
+			namespaced:     crd.Spec.Scope == apiextv1.NamespaceScoped,
+			schema:         version.Schema.OpenAPIV3Schema,
+			printerColumns: printerCols,
 		})
 
 		// Remove the YAML file after extracting schema
@@ -221,6 +243,26 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 		source.WriteString(fmt.Sprintf("\tSingular:   %q,\n", s.singular))
 		source.WriteString(fmt.Sprintf("\tNamespaced: %t,\n", s.namespaced))
 		source.WriteString(fmt.Sprintf("\tSchemaYAML: %sSchemaYAML,\n", s.typeName))
+		
+		// Add printer columns if present
+		if len(s.printerColumns) > 0 {
+			source.WriteString("\tPrinterColumns: []types.PrinterColumn{\n")
+			for _, col := range s.printerColumns {
+				source.WriteString("\t\t{\n")
+				source.WriteString(fmt.Sprintf("\t\t\tName:        %q,\n", col.name))
+				source.WriteString(fmt.Sprintf("\t\t\tType:        %q,\n", col.columnType))
+				source.WriteString(fmt.Sprintf("\t\t\tJSONPath:    %q,\n", col.jsonPath))
+				if col.description != "" {
+					source.WriteString(fmt.Sprintf("\t\t\tDescription: %q,\n", col.description))
+				}
+				if col.priority != 0 {
+					source.WriteString(fmt.Sprintf("\t\t\tPriority:    %d,\n", col.priority))
+				}
+				source.WriteString("\t\t},\n")
+			}
+			source.WriteString("\t},\n")
+		}
+		
 		source.WriteString("}\n\n")
 	}
 

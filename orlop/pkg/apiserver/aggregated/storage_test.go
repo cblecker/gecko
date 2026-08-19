@@ -33,7 +33,7 @@ func setupStorageTest(t *testing.T) *storageTestEnv {
 	scheme := newTestScheme(t)
 	store := memory.NewMemoryStore("objects", scheme, testGVK)
 	strategy := NewResourceStrategy(scheme, nil, true, testGVK, logr.Discard())
-	rs := NewResourceStorage(store, strategy, testGVK, "objects", "object", scheme, logr.Discard())
+	rs := NewResourceStorage(store, strategy, testGVK, "objects", "object", scheme, logr.Discard(), nil)
 
 	return &storageTestEnv{
 		scheme:   scheme,
@@ -420,7 +420,7 @@ func TestResourceStorage_NamespaceScoped(t *testing.T) {
 
 	// Create a non-namespaced strategy and storage.
 	strategy := NewResourceStrategy(env.scheme, nil, false, testGVK, logr.Discard())
-	rs := NewResourceStorage(env.store, strategy, testGVK, "objects", "object", env.scheme, logr.Discard())
+	rs := NewResourceStorage(env.store, strategy, testGVK, "objects", "object", env.scheme, logr.Discard(), nil)
 	if rs.NamespaceScoped() {
 		t.Error("expected NamespaceScoped=false")
 	}
@@ -492,7 +492,7 @@ func TestResourceStorage_New_PanicsOnBadGVK(t *testing.T) {
 
 	// Create a storage with a GVK that is not registered in the scheme.
 	badGVK := schema.GroupVersionKind{Group: "bad.example.com", Version: "v1", Kind: "DoesNotExist"}
-	rs := NewResourceStorage(env.store, env.strategy, badGVK, "doesnotexists", "doesnotexist", env.scheme, logr.Discard())
+	rs := NewResourceStorage(env.store, env.strategy, badGVK, "doesnotexists", "doesnotexist", env.scheme, logr.Discard(), nil)
 
 	defer func() {
 		r := recover()
@@ -515,7 +515,7 @@ func TestResourceStorage_NewList_PanicsOnBadGVK(t *testing.T) {
 
 	// Create a storage with a GVK whose list kind is not registered.
 	badGVK := schema.GroupVersionKind{Group: "bad.example.com", Version: "v1", Kind: "DoesNotExist"}
-	rs := NewResourceStorage(env.store, env.strategy, badGVK, "doesnotexists", "doesnotexist", env.scheme, logr.Discard())
+	rs := NewResourceStorage(env.store, env.strategy, badGVK, "doesnotexists", "doesnotexist", env.scheme, logr.Discard(), nil)
 
 	defer func() {
 		r := recover()
@@ -543,7 +543,7 @@ func TestResourceStorage_Get_InternalErrorOnNonNotFound(t *testing.T) {
 	filterKey := ctxKey("filter")
 	store := memory.NewMemoryStore("objects", scheme, testGVK, memory.WithContextFilter(filterKey))
 	strategy := NewResourceStrategy(scheme, nil, true, testGVK, logr.Discard())
-	rs := NewResourceStorage(store, strategy, testGVK, "objects", "object", scheme, logr.Discard())
+	rs := NewResourceStorage(store, strategy, testGVK, "objects", "object", scheme, logr.Discard(), nil)
 
 	// Use a context without the filter key set -- this causes the store to
 	// return a non-NotFound error (context filter key not found in context).

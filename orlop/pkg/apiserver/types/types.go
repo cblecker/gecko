@@ -10,6 +10,15 @@ type ParentResourceInfo struct {
 	IDField string
 }
 
+// PrinterColumn defines a custom column for kubectl output.
+type PrinterColumn struct {
+	Name        string
+	Type        string
+	JSONPath    string
+	Description string
+	Priority    int32
+}
+
 // ResourceInfo describes a single API resource type.
 type ResourceInfo struct {
 	// GVK is the GroupVersionKind for this resource
@@ -24,4 +33,6 @@ type ResourceInfo struct {
 	SchemaYAML string
 	// ParentResource optionally defines a parent resource for nested routing.
 	ParentResource *ParentResourceInfo
+	// PrinterColumns defines custom columns for kubectl get output.
+	PrinterColumns []PrinterColumn
 }
