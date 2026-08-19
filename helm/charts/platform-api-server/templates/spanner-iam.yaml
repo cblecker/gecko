@@ -1,26 +1,76 @@
 {{- if and .Values.spanner.enabled .Values.spanner.iam.serviceAccount }}
+# Runtime data-plane access: the Deployment's GCP service account gets
+# databaseUser for read/write operations only.
 apiVersion: iam.cnrm.cloud.google.com/v1beta1
 kind: IAMPolicyMember
 metadata:
   name: {{ printf "%s-spanner-user" (include "platform-api-server.fullname" .) }}
   annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
     cnrm.cloud.google.com/project-id: {{ required "spanner.projectId is required when spanner is enabled" .Values.spanner.projectId | quote }}
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
 spec:
-  # Workload Identity: the GCP service account bound to the pod's Kubernetes
-  # service account authenticates against Spanner using the granted role.
   member: {{ printf "serviceAccount:%s" .Values.spanner.iam.serviceAccount }}
   role: {{ .Values.spanner.iam.role }}
   resourceRef:
     kind: SpannerDatabase
     name: {{ .Values.spanner.databaseId }}
+{{- if .Values.spanner.iam.migrationServiceAccount }}
+---
+# DDL admin access: the migration Job's GCP service account gets
+# databaseAdmin to create tables, indexes, and change streams. This SA is
+# bound to a separate Kubernetes service account used only by the
+# short-lived PreSync Job.
+apiVersion: iam.cnrm.cloud.google.com/v1beta1
+kind: IAMPolicyMember
+metadata:
+  name: {{ printf "%s-spanner-admin" (include "platform-api-server.fullname" .) }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    cnrm.cloud.google.com/project-id: {{ .Values.spanner.projectId | quote }}
+  labels:
+    {{- include "platform-api-server.labels" . | nindent 4 }}
+spec:
+  member: {{ printf "serviceAccount:%s" .Values.spanner.iam.migrationServiceAccount }}
+  role: {{ .Values.spanner.iam.migrationRole }}
+  resourceRef:
+    kind: SpannerDatabase
+    name: {{ .Values.spanner.databaseId }}
+---
+# The migration Job's Spanner client also emits client-side metrics.
+apiVersion: iam.cnrm.cloud.google.com/v1beta1
+kind: IAMPolicyMember
+metadata:
+  name: {{ printf "%s-migrate-metric-writer" (include "platform-api-server.fullname" .) }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    cnrm.cloud.google.com/project-id: {{ .Values.spanner.projectId | quote }}
+  labels:
+    {{- include "platform-api-server.labels" . | nindent 4 }}
+spec:
+  member: {{ printf "serviceAccount:%s" .Values.spanner.iam.migrationServiceAccount }}
+  role: roles/monitoring.metricWriter
+  resourceRef:
+    apiVersion: resourcemanager.cnrm.cloud.google.com/v1beta1
+    kind: Project
+    external: {{ printf "projects/%s" .Values.spanner.projectId | quote }}
+{{- end }}
 ---
 apiVersion: iam.cnrm.cloud.google.com/v1beta1
 kind: IAMPolicyMember
 metadata:
   name: {{ printf "%s-spanner-metric-writer" (include "platform-api-server.fullname" .) }}
   annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
     cnrm.cloud.google.com/project-id: {{ .Values.spanner.projectId | quote }}
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
