@@ -296,7 +296,14 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 			Message:            "Resources have not been applied yet",
 			ObservedGeneration: gen,
 		})
-		return a || b
+		c := meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+			Type:               "ApiCertificateReady",
+			Status:             metav1.ConditionFalse,
+			Reason:             "ResourcesNotFound",
+			Message:            "Resources have not been applied yet",
+			ObservedGeneration: gen,
+		})
+		return a || b || c
 	}
 
 	// Derive ResourcesApplied from top-level conditions.
@@ -328,9 +335,12 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 	certMessage := ""
 	if certFeedback, ok := mwStatus.ResourceStatuses[certKey]; ok {
 		if v, ok := certFeedback["readyCondition"]; ok {
-			certStatus = v
-			if v == string(metav1.ConditionTrue) {
-				certReason = "CertificateReady"
+			// Validate condition value - only accept True/False/Unknown
+			if v == string(metav1.ConditionTrue) || v == string(metav1.ConditionFalse) || v == string(metav1.ConditionUnknown) {
+				certStatus = v
+				if v == string(metav1.ConditionTrue) {
+					certReason = "CertificateReady"
+				}
 			}
 		}
 	}
