@@ -9,7 +9,7 @@ require (
 	github.com/openshift-online/gecko/platform-api v0.0.0-00010101000000-000000000000
 	github.com/openshift-online/kube-applier-gcp v0.0.0-20260813072616-b7a4c3c2d105
 	github.com/spf13/cobra v1.10.2
-	github.com/stretchr/testify v1.12.0
+	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel/trace v1.45.0
 	google.golang.org/api v0.293.0
 	google.golang.org/grpc v1.83.0
@@ -91,7 +91,6 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.36.3 // indirect
 	k8s.io/apiextensions-apiserver v0.36.3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
