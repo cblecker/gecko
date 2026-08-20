@@ -358,10 +358,14 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 		Message:            appliedMessage,
 		ObservedGeneration: gen,
 	})
+	availableReason := "HostedClusterNotAvailable"
+	if availableStatus == "True" {
+		availableReason = "HostedClusterAvailable"
+	}
 	b := meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 		Type:               "HostedClusterAvailable",
 		Status:             metav1.ConditionStatus(availableStatus),
-		Reason:             "HostedClusterAvailable",
+		Reason:             availableReason,
 		ObservedGeneration: gen,
 	})
 	d := meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
