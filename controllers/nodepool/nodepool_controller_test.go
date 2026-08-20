@@ -725,6 +725,38 @@ func TestReconcile_StatusUpdateError_ReturnsError(t *testing.T) {
 	require.True(t, storeClient.statusWriter.called)
 }
 
+// TestReconcile_StaleStatus_RequeuesPending verifies that when the transport
+// reports stale status, the reconciler requeues with the pending interval even
+// though resources are applied and conditions are True.
+func TestReconcile_StaleStatus_RequeuesPending(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":           "True",
+				"allNodesHealthyCondition": "True",
+			},
+		},
+		Stale: true,
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+
+	result, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+	require.Equal(t, requeuePending, result.RequeueAfter)
+
+	// Verify that stale status was not written to the nodepool conditions.
+	require.Nil(t, storeClient.statusWriter.captured, "status should not be updated when status is stale")
+}
+
 // ---------------------------------------------------------------------------
 // Test cases – finalizer management
 // ---------------------------------------------------------------------------

@@ -190,6 +190,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, fmt.Errorf("nodepool reconciler: apply resources: %w", err)
 	}
 
+	// If status is stale, skip condition updates and requeue quickly.
+	if mwStatus != nil && mwStatus.Stale {
+		log.Infof(ctx, "nodepool reconciler: nodepool %s status is stale, requeueing after %s", nodepoolID, requeuePending)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
+	}
+
 	// Write nodepool status conditions — only update if something changed.
 	if r.applyStatusConditions(&np, mwStatus) {
 		if err := r.client.Status().Update(ctx, &np); err != nil {

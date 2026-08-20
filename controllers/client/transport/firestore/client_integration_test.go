@@ -409,3 +409,145 @@ func TestIntegration_Delete_ChunksLargeBatches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, deleteSnaps, resourceCount, "one DeleteDesire per resource")
 }
+
+// TestIntegration_Apply_StaleWhenStatusNotProcessed verifies that Apply returns
+// Stale=true when the status DB has not yet been updated by kube-applier-gcp
+// (i.e. ObservedDesireUpdateTime does not match the spec write timestamp).
+func TestIntegration_Apply_StaleWhenStatusNotProcessed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := newTestClient(t)
+	opts := emulatorOpts(t)
+
+	specsClient, err := firestore.NewClientWithDatabase(ctx, testMCName, "specs", opts...)
+	require.NoError(t, err)
+	defer specsClient.Close()
+
+	statusClient, err := firestore.NewClientWithDatabase(ctx, testMCName, "status", opts...)
+	require.NoError(t, err)
+	defer statusClient.Close()
+
+	clearCollection(ctx, t, specsClient, "applydesires")
+	clearCollection(ctx, t, specsClient, "readdesires")
+	clearCollection(ctx, t, statusClient, "applydesires")
+	clearCollection(ctx, t, statusClient, "readdesires")
+	defer clearCollection(ctx, t, specsClient, "applydesires")
+	defer clearCollection(ctx, t, specsClient, "readdesires")
+	defer clearCollection(ctx, t, statusClient, "applydesires")
+	defer clearCollection(ctx, t, statusClient, "readdesires")
+
+	manifests := [][]byte{npManifest(t, testClusterID, "stale-np")}
+
+	// First Apply — no status docs exist yet → stale.
+	status, err := c.Apply(ctx, testMCName, testClusterID, manifests)
+	require.NoError(t, err)
+	assert.True(t, status.Stale, "should be stale when no status docs exist")
+
+	// Simulate kube-applier-gcp processing: write status docs with a
+	// mismatched ObservedDesireUpdateTime (an old timestamp).
+	applySnaps, err := specsClient.Collection("applydesires").
+		Where("spec.clusterID", "==", testClusterID).
+		Documents(ctx).GetAll()
+	require.NoError(t, err)
+	require.Len(t, applySnaps, 1)
+
+	oldTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err = statusClient.Collection("applydesires").Doc(applySnaps[0].Ref.ID).Set(ctx, map[string]any{
+		"spec": kubeapplier.ApplyDesireSpec{},
+		"status": kubeapplier.ApplyDesireStatus{
+			Conditions:               []metav1.Condition{{Type: "Successful", Status: metav1.ConditionTrue, Reason: "NoErrors"}},
+			ObservedDesireUpdateTime: oldTime,
+		},
+	})
+	require.NoError(t, err)
+
+	readSnaps, err := specsClient.Collection("readdesires").
+		Where("spec.clusterID", "==", testClusterID).
+		Documents(ctx).GetAll()
+	require.NoError(t, err)
+	require.Len(t, readSnaps, 1)
+
+	_, err = statusClient.Collection("readdesires").Doc(readSnaps[0].Ref.ID).Set(ctx, map[string]any{
+		"spec": kubeapplier.ReadDesireSpec{},
+		"status": kubeapplier.ReadDesireStatus{
+			ObservedDesireUpdateTime: oldTime,
+		},
+	})
+	require.NoError(t, err)
+
+	// Second Apply — status docs exist but with old timestamps → stale.
+	status, err = c.Apply(ctx, testMCName, testClusterID, manifests)
+	require.NoError(t, err)
+	assert.True(t, status.Stale, "should be stale when ObservedDesireUpdateTime is old")
+
+	// Now simulate kube-applier-gcp catching up: update status docs with the
+	// current spec write timestamps. We need to read the spec UpdateTime.
+	applySnaps, err = specsClient.Collection("applydesires").
+		Where("spec.clusterID", "==", testClusterID).
+		Documents(ctx).GetAll()
+	require.NoError(t, err)
+	require.Len(t, applySnaps, 1)
+
+	_, err = statusClient.Collection("applydesires").Doc(applySnaps[0].Ref.ID).Set(ctx, map[string]any{
+		"spec": kubeapplier.ApplyDesireSpec{},
+		"status": kubeapplier.ApplyDesireStatus{
+			Conditions:               []metav1.Condition{{Type: "Successful", Status: metav1.ConditionTrue, Reason: "NoErrors"}},
+			ObservedDesireUpdateTime: applySnaps[0].UpdateTime,
+		},
+	})
+	require.NoError(t, err)
+
+	readSnaps, err = specsClient.Collection("readdesires").
+		Where("spec.clusterID", "==", testClusterID).
+		Documents(ctx).GetAll()
+	require.NoError(t, err)
+	require.Len(t, readSnaps, 1)
+
+	_, err = statusClient.Collection("readdesires").Doc(readSnaps[0].Ref.ID).Set(ctx, map[string]any{
+		"spec": kubeapplier.ReadDesireSpec{},
+		"status": kubeapplier.ReadDesireStatus{
+			ObservedDesireUpdateTime: readSnaps[0].UpdateTime,
+		},
+	})
+	require.NoError(t, err)
+
+	// Third Apply — same manifests, status timestamps now match → not stale.
+	status, err = c.Apply(ctx, testMCName, testClusterID, manifests)
+	require.NoError(t, err)
+	assert.False(t, status.Stale, "should not be stale when ObservedDesireUpdateTime matches")
+}
+
+// TestIntegration_GetStatus_NeverStale verifies that GetStatus (without Apply)
+// never reports stale, since there are no write timestamps to compare against.
+func TestIntegration_GetStatus_NeverStale(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := newTestClient(t)
+	opts := emulatorOpts(t)
+
+	specsClient, err := firestore.NewClientWithDatabase(ctx, testMCName, "specs", opts...)
+	require.NoError(t, err)
+	defer specsClient.Close()
+
+	statusClient, err := firestore.NewClientWithDatabase(ctx, testMCName, "status", opts...)
+	require.NoError(t, err)
+	defer statusClient.Close()
+
+	clearCollection(ctx, t, specsClient, "applydesires")
+	clearCollection(ctx, t, statusClient, "applydesires")
+	defer clearCollection(ctx, t, specsClient, "applydesires")
+	defer clearCollection(ctx, t, statusClient, "applydesires")
+
+	const docID = "doc-getstatus"
+	_, err = specsClient.Collection("applydesires").Doc(docID).Set(ctx, specsApplyDesire(testClusterID, "my-hc"))
+	require.NoError(t, err)
+
+	_, err = statusClient.Collection("applydesires").Doc(docID).Set(ctx, statusApplyDesire([]metav1.Condition{
+		{Type: "Successful", Status: metav1.ConditionTrue, Reason: "NoErrors"},
+	}))
+	require.NoError(t, err)
+
+	status, err := c.GetStatus(ctx, testMCName, testClusterID)
+	require.NoError(t, err)
+	assert.False(t, status.Stale, "GetStatus without Apply should never report stale")
+}

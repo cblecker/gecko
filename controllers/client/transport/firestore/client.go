@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/option"
@@ -115,7 +116,13 @@ func (c *Client) Apply(ctx context.Context, targetCluster, clusterID string, man
 	}
 
 	batch := mc.specs.BulkWriter(ctx)
-	var jobs []*firestore.BulkWriterJob
+
+	// Track jobs per document type so we can extract write timestamps.
+	type writtenDoc struct {
+		docID string
+		job   *firestore.BulkWriterJob
+	}
+	var applyDocs, readDocs []writtenDoc
 
 	for _, raw := range manifests {
 		if len(raw) == 0 {
@@ -140,7 +147,7 @@ func (c *Client) Apply(ctx context.Context, targetCluster, clusterID string, man
 		if err != nil {
 			return nil, fmt.Errorf("firestore transport: Apply %s/%s set apply desire: %w", targetCluster, clusterID, err)
 		}
-		jobs = append(jobs, job)
+		applyDocs = append(applyDocs, writtenDoc{docID: applyID, job: job})
 
 		// Write ReadDesire
 		readID, readData := buildReadDesireDoc(clusterID, targetCluster, ref)
@@ -149,21 +156,31 @@ func (c *Client) Apply(ctx context.Context, targetCluster, clusterID string, man
 		if err != nil {
 			return nil, fmt.Errorf("firestore transport: Apply %s/%s set read desire: %w", targetCluster, clusterID, err)
 		}
-		jobs = append(jobs, job)
+		readDocs = append(readDocs, writtenDoc{docID: readID, job: job})
 	}
 
 	batch.Flush()
 
-	// Check job results for write errors.
-	for _, job := range jobs {
-		if _, err := job.Results(); err != nil {
+	// Collect write timestamps from job results for staleness detection.
+	writeTimes := make(map[string]time.Time, len(applyDocs)+len(readDocs))
+	for _, wd := range applyDocs {
+		wr, err := wd.job.Results()
+		if err != nil {
 			return nil, fmt.Errorf("firestore transport: Apply %s/%s write error: %w", targetCluster, clusterID, err)
 		}
+		writeTimes[collectionApplyDesires+"/"+wd.docID] = wr.UpdateTime
+	}
+	for _, wd := range readDocs {
+		wr, err := wd.job.Results()
+		if err != nil {
+			return nil, fmt.Errorf("firestore transport: Apply %s/%s write error: %w", targetCluster, clusterID, err)
+		}
+		writeTimes[collectionReadDesires+"/"+wd.docID] = wr.UpdateTime
 	}
 
 	c.log.Infof(ctx, "firestore transport: applied %d manifests for %s/%s", len(manifests), targetCluster, clusterID)
 
-	return c.GetStatus(ctx, targetCluster, clusterID)
+	return c.getStatus(ctx, targetCluster, clusterID, writeTimes)
 }
 
 // GetStatus looks up document IDs from the specs DB by clusterID, then fetches
@@ -171,6 +188,13 @@ func (c *Client) Apply(ctx context.Context, targetCluster, clusterID string, man
 // This two-step approach is needed because kube-applier-gcp does not copy the
 // spec fields into the status DB — only the document IDs match across DBs.
 func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string) (*transport.Status, error) {
+	return c.getStatus(ctx, targetCluster, clusterID, nil)
+}
+
+// getStatus is the internal implementation of GetStatus. When specWriteTimes is
+// non-nil (i.e. called from Apply), each desire's ObservedDesireUpdateTime is
+// compared against the write timestamp to detect stale status.
+func (c *Client) getStatus(ctx context.Context, targetCluster, clusterID string, specWriteTimes map[string]time.Time) (*transport.Status, error) {
 	mc, err := c.clients(ctx, targetCluster)
 	if err != nil {
 		return nil, err
@@ -195,6 +219,7 @@ func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string)
 	// GetAll preserves input order, so statusSnaps[i] corresponds to specsSnaps[i].
 	// The spec fields in status docs are empty (kube-applier-gcp doesn't copy them),
 	// so we take the spec from the specs DB snapshot instead.
+	stale := false
 	applyDesires := make([]kubeapplier.ApplyDesire, 0, len(specsApplySnaps))
 	if len(specsApplySnaps) > 0 {
 		applyRefs := make([]*firestore.DocumentRef, len(specsApplySnaps))
@@ -214,6 +239,7 @@ func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string)
 			if !snap.Exists() {
 				// kube-applier-gcp has not created the status doc yet; report it as pending.
 				applyDesires = append(applyDesires, kubeapplier.ApplyDesire{Spec: specsAD.Spec})
+				stale = stale || specWriteTimes != nil
 				continue
 			}
 			var ad kubeapplier.ApplyDesire
@@ -221,6 +247,12 @@ func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string)
 				return nil, fmt.Errorf("firestore transport: GetStatus %s/%s decode apply desire %s: %w", targetCluster, clusterID, snap.Ref.ID, err)
 			}
 			ad.Spec = specsAD.Spec
+			// Check staleness: compare write timestamp against ObservedDesireUpdateTime.
+			if wt, ok := specWriteTimes[collectionApplyDesires+"/"+specsApplySnaps[i].Ref.ID]; ok {
+				if ad.Status.ObservedDesireUpdateTime.Before(wt) {
+					stale = true
+				}
+			}
 			applyDesires = append(applyDesires, ad)
 		}
 	}
@@ -244,6 +276,7 @@ func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string)
 			if !snap.Exists() {
 				// kube-applier-gcp has not created the status doc yet; report it as pending.
 				readDesires = append(readDesires, kubeapplier.ReadDesire{Spec: specsRD.Spec})
+				stale = stale || specWriteTimes != nil
 				continue
 			}
 			var rd kubeapplier.ReadDesire
@@ -251,6 +284,12 @@ func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string)
 				return nil, fmt.Errorf("firestore transport: GetStatus %s/%s decode read desire %s: %w", targetCluster, clusterID, snap.Ref.ID, err)
 			}
 			rd.Spec = specsRD.Spec
+			// Check staleness: compare write timestamp against ObservedDesireUpdateTime.
+			if wt, ok := specWriteTimes[collectionReadDesires+"/"+specsReadSnaps[i].Ref.ID]; ok {
+				if rd.Status.ObservedDesireUpdateTime.Before(wt) {
+					stale = true
+				}
+			}
 			// Manually decode status_kubeContent (stored as map[string]any at doc root).
 			if v, ok := snap.Data()["status_kubeContent"]; ok && v != nil {
 				raw, err := json.Marshal(v)
@@ -271,6 +310,7 @@ func (c *Client) GetStatus(ctx context.Context, targetCluster, clusterID string)
 	return &transport.Status{
 		Conditions:       aggregateConditions(applyDesires),
 		ResourceStatuses: resourceStatuses,
+		Stale:            stale,
 	}, nil
 }
 

@@ -175,6 +175,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, fmt.Errorf("%s: apply resources: %w", adapterName, err)
 	}
 
+	// If status is stale, skip condition updates and requeue quickly.
+	if mwStatus != nil && mwStatus.Stale {
+		log.Infof(ctx, "hc-controller: cluster %s status is stale, requeueing after %s", clusterID, requeuePending)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
+	}
+
 	// Write status conditions — only update if something changed.
 	if r.applyStatusConditions(&cluster, mwStatus) {
 		if err := r.client.Status().Update(ctx, &cluster); err != nil {

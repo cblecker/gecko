@@ -766,6 +766,33 @@ func TestReconcile_StatusUpdateError_ReturnsError(t *testing.T) {
 	require.True(t, storeClient.statusWriter.called)
 }
 
+// TestReconcile_StaleStatus_RequeuesPending verifies that when the transport
+// reports stale status, the reconciler requeues with the pending interval even
+// though resources are applied, and does not write stale conditions.
+func TestReconcile_StaleStatus_RequeuesPending(t *testing.T) {
+	clusterID := "cluster-abc"
+	mcName := "mc-cluster-1"
+
+	cluster := buildReadyCluster(clusterID, "4.15.0")
+
+	tr := mock.New()
+	tr.StatusOverrides[mcName+"/"+clusterID] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		Stale: true,
+	}
+
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil)
+
+	result, err := r.Reconcile(context.Background(), clusterReq(clusterID))
+	require.NoError(t, err)
+	require.Equal(t, 15*time.Second, result.RequeueAfter)
+
+	// Verify that stale status was not written to the cluster conditions.
+	require.Nil(t, storeClient.statusWriter.captured, "status should not be updated when status is stale")
+}
+
 // ---------------------------------------------------------------------------
 // Test cases – finalizer management
 // ---------------------------------------------------------------------------
