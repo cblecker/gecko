@@ -662,7 +662,7 @@ func TestReconcile_ApplyConditions_Idempotent(t *testing.T) {
 	// including ObservedGeneration (cluster.Generation = 2).
 	cluster.Status.Conditions = []metav1.Condition{
 		{Type: "ResourcesApplied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", Message: "", ObservedGeneration: 2},
-		{Type: "HostedClusterAvailable", Status: metav1.ConditionFalse, Reason: "HostedClusterAvailable", Message: "", ObservedGeneration: 2},
+		{Type: "HostedClusterAvailable", Status: metav1.ConditionFalse, Reason: "HostedClusterNotAvailable", Message: "", ObservedGeneration: 2},
 		{Type: "ApiCertificateReady", Status: metav1.ConditionFalse, Reason: "CertificateNotReady", Message: "", ObservedGeneration: 2},
 	}
 
