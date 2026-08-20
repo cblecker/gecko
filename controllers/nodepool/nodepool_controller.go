@@ -210,6 +210,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Infof(ctx, "nodepool reconciler: nodepool %s resources not yet applied, requeueing after %s", nodepoolID, requeuePending)
 		return reconcile.Result{RequeueAfter: requeuePending}, nil
 	}
+
+	if !meta.IsStatusConditionTrue(cluster.Status.Conditions, "HostedClusterAvailable") {
+		log.Infof(ctx, "nodepool reconciler: cluster %s not yet available, requeueing nodepool %s after %s", clusterID, nodepoolID, requeuePending)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
+	}
+
+	if !meta.IsStatusConditionTrue(np.Status.Conditions, "NodePoolAvailable") {
+		log.Infof(ctx, "nodepool reconciler: nodepool %s not yet available, requeueing after %s", nodepoolID, requeuePending)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
+	}
+
 	log.Infof(ctx, "nodepool reconciler: nodepool %s reconciled, requeueing after %s", nodepoolID, requeueStable)
 	return reconcile.Result{RequeueAfter: requeueStable}, nil
 }

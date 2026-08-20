@@ -679,6 +679,69 @@ func TestReconcile_MWNotApplied_RequeuesPending(t *testing.T) {
 	require.Equal(t, "MachinesNotReady", progressing.Reason)
 }
 
+// TestReconcile_ResourcesApplied_ClusterNotAvailable_RequeuesPending verifies that when
+// nodepool resources are applied but the parent cluster's HostedClusterAvailable is False,
+// the reconciler keeps polling at the pending interval.
+func TestReconcile_ResourcesApplied_ClusterNotAvailable_RequeuesPending(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, false) // placement ready, HC NOT available
+
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {"readyCondition": "True", "allNodesHealthyCondition": "True"},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+
+	result, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+	require.Equal(t, requeuePending, result.RequeueAfter, "should requeue at pending interval while cluster is not available")
+	require.True(t, storeClient.statusWriter.called)
+}
+
+// TestReconcile_ResourcesApplied_NodePoolNotAvailable_RequeuesPending verifies that when
+// nodepool resources are applied and the cluster is available, but NodePoolAvailable is False,
+// the reconciler keeps polling at the pending interval.
+func TestReconcile_ResourcesApplied_NodePoolNotAvailable_RequeuesPending(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true) // placement ready, HC available
+
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":           "False", // NodePool not available
+				"allNodesHealthyCondition": "False",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+
+	result, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+	require.Equal(t, requeuePending, result.RequeueAfter, "should requeue at pending interval while nodepool is not available")
+	require.True(t, storeClient.statusWriter.called)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	applied := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolResourcesApplied")
+	require.NotNil(t, applied)
+	require.Equal(t, metav1.ConditionTrue, applied.Status)
+	available := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolAvailable")
+	require.NotNil(t, available)
+	require.Equal(t, metav1.ConditionFalse, available.Status)
+}
+
 // TestReconcile_StatusUpdateConflict_ReturnsNoError verifies that a conflict error on
 // Status.Update after applyStatusConditions is silently swallowed.
 func TestReconcile_StatusUpdateConflict_ReturnsNoError(t *testing.T) {
