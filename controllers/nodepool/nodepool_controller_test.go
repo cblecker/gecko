@@ -580,6 +580,10 @@ func TestReconcile_MWStatusNil_RequeuesPending(t *testing.T) {
 	require.NotNil(t, available)
 	require.Equal(t, metav1.ConditionFalse, available.Status)
 	require.Equal(t, "ResourcesNotFound", available.Reason)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionFalse, progressing.Status)
+	require.Equal(t, "AsExpected", progressing.Reason)
 }
 
 // ---------------------------------------------------------------------------
@@ -599,10 +603,11 @@ func TestReconcile_HappyPath(t *testing.T) {
 		},
 		ResourceStatuses: map[string]map[string]string{
 			npKey: {
-				"readyCondition":           "True",
-				"allNodesHealthyCondition": "True",
-				"replicas":                 "2",
-				"version":                  "4.16.0",
+				"readyCondition":            "True",
+				"allNodesHealthyCondition":  "True",
+				"allMachinesReadyCondition": "True",
+				"replicas":                  "2",
+				"version":                   "4.16.0",
 			},
 		},
 	}
@@ -627,6 +632,10 @@ func TestReconcile_HappyPath(t *testing.T) {
 	require.NotNil(t, healthy)
 	require.Equal(t, metav1.ConditionTrue, healthy.Status)
 	require.Equal(t, "NodePoolHealthy", healthy.Reason)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionFalse, progressing.Status)
+	require.Equal(t, "AsExpected", progressing.Reason)
 }
 
 // TestReconcile_MWNotApplied_RequeuesPending verifies that when Applied=False the
@@ -642,7 +651,10 @@ func TestReconcile_MWNotApplied_RequeuesPending(t *testing.T) {
 			{Type: "Applied", Status: metav1.ConditionFalse, Reason: "ApplyFailed"},
 		},
 		ResourceStatuses: map[string]map[string]string{
-			npKey: {"readyCondition": "False"},
+			npKey: {
+				"readyCondition":            "False",
+				"allMachinesReadyCondition": "False",
+			},
 		},
 	}
 
@@ -661,6 +673,10 @@ func TestReconcile_MWNotApplied_RequeuesPending(t *testing.T) {
 	require.NotNil(t, healthy)
 	require.Equal(t, metav1.ConditionFalse, healthy.Status)
 	require.Equal(t, "NodePoolNotHealthy", healthy.Reason)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "MachinesNotReady", progressing.Reason)
 }
 
 // TestReconcile_StatusUpdateConflict_ReturnsNoError verifies that a conflict error on
@@ -932,4 +948,225 @@ func TestReconcile_Deletion_RemoveFinalizerError(t *testing.T) {
 	require.Contains(t, err.Error(), "remove finalizer")
 	require.Len(t, tr.CleanupDeleteDesiresCalls, 1, "cleanup should have been called before finalizer removal failed")
 	require.True(t, storeClient.updateCalled)
+}
+
+// ---------------------------------------------------------------------------
+// Test cases – NodePoolProgressing condition
+// ---------------------------------------------------------------------------
+
+func TestReconcile_Progressing_AllMachinesReadyFalse(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":            "True",
+				"allNodesHealthyCondition":  "True",
+				"allMachinesReadyCondition": "False",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "MachinesNotReady", progressing.Reason)
+}
+
+func TestReconcile_Progressing_AllMachinesReadyAbsent(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":           "True",
+				"allNodesHealthyCondition": "True",
+				// allMachinesReadyCondition intentionally absent
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "MachinesNotReady", progressing.Reason)
+}
+
+func TestReconcile_Progressing_UpdatingConfig(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":            "True",
+				"allNodesHealthyCondition":  "True",
+				"allMachinesReadyCondition": "True",
+				"updatingConfigCondition":   "True",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "UpdatingConfig", progressing.Reason)
+}
+
+func TestReconcile_Progressing_Priority_UpdatingConfigWins(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":            "True",
+				"allNodesHealthyCondition":  "True",
+				"allMachinesReadyCondition": "True",
+				"updatingConfigCondition":   "True",
+				"updatingVersionCondition":  "True",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "UpdatingConfig", progressing.Reason)
+}
+
+func TestReconcile_Progressing_UpdatingVersion(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":             "True",
+				"allNodesHealthyCondition":   "True",
+				"allMachinesReadyCondition":  "True",
+				"updatingVersionCondition":   "True",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "UpdatingVersion", progressing.Reason)
+}
+
+func TestReconcile_Progressing_AsExpected(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":            "True",
+				"allNodesHealthyCondition":  "True",
+				"allMachinesReadyCondition": "True",
+				"updatingConfigCondition":   "False",
+				"updatingVersionCondition":  "False",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionFalse, progressing.Status)
+	require.Equal(t, "AsExpected", progressing.Reason)
+}
+
+func TestReconcile_Progressing_Priority_MachinesNotReadyWins(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/np-test"] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			npKey: {
+				"readyCondition":            "True",
+				"allNodesHealthyCondition":  "True",
+				"allMachinesReadyCondition": "False",
+				"updatingConfigCondition":   "True",
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+
+	captured := storeClient.statusWriter.captured.(*privatev1.NodePool)
+	progressing := meta.FindStatusCondition(captured.Status.Conditions, "NodePoolProgressing")
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionTrue, progressing.Status)
+	require.Equal(t, "MachinesNotReady", progressing.Reason)
 }

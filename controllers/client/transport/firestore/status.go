@@ -165,8 +165,11 @@ func extractHCFields(raw []byte) (map[string]string, error) {
 }
 
 // extractNPFields extracts NodePool status fields from raw live-object JSON.
-//   - readyCondition: .status.conditions[type=Ready].status
-//   - allNodesHealthyCondition: .status.conditions[type=AllNodesHealthy].status
+//   - readyCondition:              .status.conditions[type=Ready].status
+//   - allNodesHealthyCondition:    .status.conditions[type=AllNodesHealthy].status
+//   - allMachinesReadyCondition:   .status.conditions[type=AllMachinesReady].status
+//   - updatingConfigCondition:     .status.conditions[type=UpdatingConfig].status
+//   - updatingVersionCondition:    .status.conditions[type=UpdatingVersion].status
 func extractNPFields(raw []byte) (map[string]string, error) {
 	fields := map[string]string{}
 
@@ -188,6 +191,12 @@ func extractNPFields(raw []byte) (map[string]string, error) {
 			fields["readyCondition"] = c.Status
 		case "AllNodesHealthy":
 			fields["allNodesHealthyCondition"] = c.Status
+		case "AllMachinesReady":
+			fields["allMachinesReadyCondition"] = c.Status
+		case "UpdatingConfig":
+			fields["updatingConfigCondition"] = c.Status
+		case "UpdatingVersion":
+			fields["updatingVersionCondition"] = c.Status
 		}
 	}
 

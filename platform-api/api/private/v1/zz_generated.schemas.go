@@ -59,6 +59,11 @@ var NodePoolResourceInfo = types.ResourceInfo{
 			JSONPath:    ".status.conditions[?(@.type==\"NodePoolHealthy\")].status",
 		},
 		{
+			Name:        "Progressing",
+			Type:        "string",
+			JSONPath:    ".status.conditions[?(@.type==\"NodePoolProgressing\")].status",
+		},
+		{
 			Name:        "Age",
 			Type:        "date",
 			JSONPath:    ".metadata.creationTimestamp",
