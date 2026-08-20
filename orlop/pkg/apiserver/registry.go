@@ -199,8 +199,9 @@ func (r *ResourceRegistry) CreateConvertingHandler(converter interface{}, privat
 		converter.(*conversion.Converter),
 		info.GVK,
 		info.Plural,
-		r.scheme,      // Public scheme from registry
-		privateScheme, // Private scheme passed in
+		r.scheme,            // Public scheme from registry
+		privateScheme,       // Private scheme passed in
+		info.PrinterColumns, // Printer columns for Table format
 		r.logger.WithValues("resource", info.Plural),
 	)
 

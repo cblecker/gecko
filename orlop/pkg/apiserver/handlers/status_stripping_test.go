@@ -106,6 +106,7 @@ func setupStatusStrippingTest(t *testing.T) (*ConvertingResourceHandler, *memory
 		"objects",
 		scheme,
 		scheme,
+		nil, // No printer columns for this test
 		logger,
 	)
 

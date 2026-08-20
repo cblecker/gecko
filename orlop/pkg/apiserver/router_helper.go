@@ -37,8 +37,9 @@ func createConvertingHandlerWithSharedStore(publicRegistry *ResourceRegistry, pr
 		converter,     // Converter between public and private
 		publicRes.GVK, // Public GVK
 		publicRes.Plural,
-		publicRegistry.scheme, // Public scheme
-		privateScheme,         // Private scheme
+		publicRegistry.scheme,    // Public scheme
+		privateScheme,            // Private scheme
+		publicRes.PrinterColumns, // Printer columns for Table format
 		publicRegistry.logger.WithValues("resource", publicRes.Plural),
 	)
 

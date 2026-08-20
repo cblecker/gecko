@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/aggregated"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/schema"
@@ -19,6 +21,7 @@ import (
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -29,14 +32,15 @@ import (
 // ConvertingResourceHandler wraps a ResourceHandler and performs conversions
 // between public and private API types.
 type ConvertingResourceHandler struct {
-	store         storage.ResourceStore
-	processor     *schema.Processor
-	converter     *conversion.Converter
-	gvk           runtimeschema.GroupVersionKind
-	resourceType  string
-	publicScheme  *runtime.Scheme // Scheme for public API types
-	privateScheme *runtime.Scheme // Scheme for private API types
-	logger        logr.Logger
+	store          storage.ResourceStore
+	processor      *schema.Processor
+	converter      *conversion.Converter
+	gvk            runtimeschema.GroupVersionKind
+	resourceType   string
+	publicScheme   *runtime.Scheme // Scheme for public API types
+	privateScheme  *runtime.Scheme // Scheme for private API types
+	printerColumns []types.PrinterColumn
+	logger         logr.Logger
 }
 
 // stripStatus removes the status field from a map, case-insensitively.
@@ -60,6 +64,7 @@ func NewConvertingResourceHandler(
 	resourceType string,
 	publicScheme *runtime.Scheme,
 	privateScheme *runtime.Scheme,
+	printerColumns []types.PrinterColumn,
 	logger logr.Logger,
 ) *ConvertingResourceHandler {
 	if logger.GetSink() == nil {
@@ -71,14 +76,15 @@ func NewConvertingResourceHandler(
 		panic("ConvertingResourceHandler requires a non-nil schema processor")
 	}
 	return &ConvertingResourceHandler{
-		store:         store,
-		processor:     processor,
-		converter:     converter,
-		gvk:           gvk,
-		resourceType:  resourceType,
-		publicScheme:  publicScheme,
-		privateScheme: privateScheme,
-		logger:        logger,
+		store:          store,
+		processor:      processor,
+		converter:      converter,
+		gvk:            gvk,
+		resourceType:   resourceType,
+		publicScheme:   publicScheme,
+		privateScheme:  privateScheme,
+		printerColumns: printerColumns,
+		logger:         logger,
 	}
 }
 
@@ -324,6 +330,69 @@ func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request)
 			continue // Skip objects that fail conversion
 		}
 		publicObjects = append(publicObjects, publicObj)
+	}
+
+	// Check if client wants Table format (kubectl does)
+	// Accept header may contain multiple media types with parameters like:
+	// "application/json;as=Table;v=v1;g=meta.k8s.io,application/json"
+	wantsTable := false
+	acceptHeader := r.Header.Get("Accept")
+	for _, part := range strings.Split(acceptHeader, ",") {
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil {
+			continue
+		}
+		if mediaType == "application/json" && params["as"] == "Table" {
+			// Check quality value - q=0 means "not acceptable"
+			if q := params["q"]; q != "" && q == "0" {
+				continue
+			}
+			wantsTable = true
+			break
+		}
+	}
+
+	if wantsTable && h.printerColumns != nil && len(h.printerColumns) > 0 {
+		// Convert to Table format using CustomTableConvertor
+		gr := runtimeschema.GroupResource{Group: h.gvk.Group, Resource: h.resourceType}
+		convertor := aggregated.NewCustomTableConvertor(gr, h.printerColumns)
+
+		// Convert list to unstructured for table conversion
+		unstructuredList := &unstructured.UnstructuredList{}
+		unstructuredList.SetAPIVersion(h.gvk.GroupVersion().String())
+		unstructuredList.SetKind(h.gvk.Kind + "List")
+		unstructuredList.SetResourceVersion(privateList.GetResourceVersion())
+
+		// Convert public objects to unstructured items
+		for _, obj := range publicObjects {
+			unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+			if err != nil {
+				h.logger.V(1).Info("Failed to convert object to unstructured for table", "error", err)
+				continue
+			}
+			unstructuredList.Items = append(unstructuredList.Items, unstructured.Unstructured{Object: unstructuredObj})
+		}
+
+		// ConvertToTable with nil opts uses default table conversion options
+		table, err := convertor.ConvertToTable(r.Context(), unstructuredList, nil)
+		if err != nil {
+			h.logger.Error(err, "Table conversion failed", "kind", h.gvk.Kind)
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to table: %v", err))
+			return
+		}
+
+		if namespace == "" {
+			h.logger.V(1).Info("Listed as Table (converting)", "kind", h.gvk.Kind, "scope", "cluster", "count", len(publicObjects))
+		} else {
+			h.logger.V(1).Info("Listed as Table (converting)", "kind", h.gvk.Kind, "namespace", namespace, "count", len(publicObjects))
+		}
+
+		w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(table); err != nil {
+			h.logger.Error(err, "Failed to encode Table response", "kind", h.gvk.Kind)
+		}
+		return
 	}
 
 	// Build list response manually as JSON to avoid type conversion issues

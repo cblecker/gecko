@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -85,6 +87,7 @@ func setupConvertingHandlerTest(t *testing.T) (*ConvertingResourceHandler, *memo
 		"testobjects",
 		scheme,
 		scheme,
+		nil, // No printer columns
 		logger,
 	)
 
@@ -409,5 +412,85 @@ func TestCreate_SetsCreatedByAnnotation_NoHeader(t *testing.T) {
 	email := extractUserEmail(req)
 	if email != "" {
 		t.Errorf("expected empty email without header, got %q", email)
+	}
+}
+
+func TestAcceptHeaderTableDetection(t *testing.T) {
+	tests := []struct {
+		name         string
+		acceptHeader string
+		wantsTable   bool
+	}{
+		{
+			name:         "no Accept header",
+			acceptHeader: "",
+			wantsTable:   false,
+		},
+		{
+			name:         "Accept: application/json",
+			acceptHeader: "application/json",
+			wantsTable:   false,
+		},
+		{
+			name:         "Accept: application/json;as=Table",
+			acceptHeader: "application/json;as=Table",
+			wantsTable:   true,
+		},
+		{
+			name:         "Accept: application/json;as=Table;v=v1;g=meta.k8s.io",
+			acceptHeader: "application/json;as=Table;v=v1;g=meta.k8s.io",
+			wantsTable:   true,
+		},
+		{
+			name:         "Accept: application/json;as=Table;q=0,application/json (q=0 not acceptable)",
+			acceptHeader: "application/json;as=Table;q=0,application/json",
+			wantsTable:   false,
+		},
+		{
+			name:         "Accept: application/json;as=Table;q=0.5",
+			acceptHeader: "application/json;as=Table;q=0.5",
+			wantsTable:   true,
+		},
+		{
+			name:         "Accept: text/html,application/json;as=Table",
+			acceptHeader: "text/html,application/json;as=Table",
+			wantsTable:   true,
+		},
+		{
+			name:         "Accept: application/json;as=NotTable",
+			acceptHeader: "application/json;as=NotTable",
+			wantsTable:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			if tt.acceptHeader != "" {
+				req.Header.Set("Accept", tt.acceptHeader)
+			}
+
+			// Parse Accept header (same logic as ConvertingResourceHandler.List)
+			wantsTable := false
+			acceptHeader := req.Header.Get("Accept")
+			for _, part := range strings.Split(acceptHeader, ",") {
+				mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+				if err != nil {
+					continue
+				}
+				if mediaType == "application/json" && params["as"] == "Table" {
+					// Check quality value - q=0 means "not acceptable"
+					if q := params["q"]; q != "" && q == "0" {
+						continue
+					}
+					wantsTable = true
+					break
+				}
+			}
+
+			if wantsTable != tt.wantsTable {
+				t.Errorf("expected wantsTable=%v, got %v", tt.wantsTable, wantsTable)
+			}
+		})
 	}
 }
