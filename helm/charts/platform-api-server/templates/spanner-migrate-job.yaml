@@ -1,8 +1,11 @@
 {{- if .Values.spanner.enabled }}
-# ArgoCD PreSync hook: runs DDL migrations once before the Deployment is
-# applied, so the platform-api-server never needs database admin privileges.
-# The Job uses roles/spanner.databaseAdmin to create tables, indexes, and
-# change streams; the long-running Deployment uses only databaseUser.
+# Spanner DDL migration Job. Runs at wave -5 alongside SpannerDatabase + IAM
+# (per GCP-171 3-wave standard: -5 for infra, 0 for apps). Uses a dedicated service account with
+# roles/spanner.databaseAdmin so the main Deployment only needs databaseUser.
+#
+# Migrations are idempotent (ensureTable checks existence, handles AlreadyExists).
+# Replace=true allows ArgoCD to delete+recreate the Job when the spec changes
+# (Jobs are immutable in Kubernetes).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -10,12 +13,12 @@ metadata:
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-5"
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 spec:
   backoffLimit: 3
   # Must exceed the in-process migration timeout (5 min) and cover all
-  # backoffLimit retries: 5 min × 4 attempts = 20 min, plus headroom.
+  # backoffLimit retries: 5 min x 4 attempts = 20 min, plus headroom.
   activeDeadlineSeconds: 1500
   template:
     metadata:

@@ -5,6 +5,15 @@ metadata:
   name: {{ .Values.spanner.databaseId }}
   annotations:
     cnrm.cloud.google.com/project-id: {{ required "spanner.projectId is required when spanner is enabled" .Values.spanner.projectId | quote }}
+    # Abandon: if this CR is ever deleted (app pruning, accidental removal),
+    # KCC must NOT delete the GCP database. Data preservation over cleanup.
+    cnrm.cloud.google.com/deletion-policy: abandon
+    # Wave -5: all Spanner infrastructure (database, IAM, migration Job) is
+    # co-deployed per GCP-171 3-wave standard. KCC reconciles continuously,
+    # so if IAM is applied before the database is ready in GCP, KCC retries
+    # until the database exists. ArgoCD waits for all wave -5 resources to
+    # be healthy before advancing to wave 0 (Deployment).
+    argocd.argoproj.io/sync-wave: "-5"
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
 spec:

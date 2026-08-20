@@ -6,9 +6,7 @@ kind: IAMPolicyMember
 metadata:
   name: {{ printf "%s-spanner-user" (include "platform-api-server.fullname" .) }}
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "-5"
     cnrm.cloud.google.com/project-id: {{ required "spanner.projectId is required when spanner is enabled" .Values.spanner.projectId | quote }}
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
@@ -24,15 +22,13 @@ spec:
 # DDL admin access: the migration Job's GCP service account gets
 # databaseAdmin to create tables, indexes, and change streams. This SA is
 # bound to a separate Kubernetes service account used only by the
-# short-lived PreSync Job.
+# migration Job, keeping the Deployment at databaseUser.
 apiVersion: iam.cnrm.cloud.google.com/v1beta1
 kind: IAMPolicyMember
 metadata:
   name: {{ printf "%s-spanner-admin" (include "platform-api-server.fullname" .) }}
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "-5"
     cnrm.cloud.google.com/project-id: {{ .Values.spanner.projectId | quote }}
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
@@ -50,9 +46,7 @@ kind: IAMPolicyMember
 metadata:
   name: {{ printf "%s-migrate-metric-writer" (include "platform-api-server.fullname" .) }}
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "-5"
     cnrm.cloud.google.com/project-id: {{ .Values.spanner.projectId | quote }}
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
@@ -70,9 +64,7 @@ kind: IAMPolicyMember
 metadata:
   name: {{ printf "%s-spanner-metric-writer" (include "platform-api-server.fullname" .) }}
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "-5"
     cnrm.cloud.google.com/project-id: {{ .Values.spanner.projectId | quote }}
   labels:
     {{- include "platform-api-server.labels" . | nindent 4 }}
