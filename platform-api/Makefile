@@ -1,4 +1,4 @@
-.PHONY: generate build test
+.PHONY: generate build test server-start server-stop server-logs
 
 generate:
 	@echo "Generating public APIs, schemas, and deepcopy methods..."
@@ -10,9 +10,8 @@ build:
 
 test:
 	go test ./...
-# Local server for testing (memory backend)
-.PHONY: server-start server-stop server-logs server-test
 
+# Local server for testing (memory backend)
 server-start:
 	@echo "Starting platform-api-server (memory backend)..."
 	@go build -o /tmp/platform-api-server ./cmd/platform-api-server
@@ -34,13 +33,3 @@ server-stop:
 
 server-logs:
 	@tail -f /tmp/platform-api-server.log
-
-server-test:
-	@echo "Testing server endpoints..."
-	@echo "1. Public API discovery:"
-	@curl -s http://127.0.0.1:18081/apis/gcp.managed.openshift.io/v1 | jq -r '.resources[].name'
-	@echo "\n2. Create test cluster:"
-	@echo '{"apiVersion":"gcp.managed.openshift.io/v1","kind":"Cluster","metadata":{"name":"test1","namespace":"test"},"spec":{"platform":{"type":"GCP","gcp":{"projectID":"test","region":"us-central1","workloadIdentity":{"poolID":"pool","projectNumber":"123","providerID":"provider"}}},"release":{"version":"4.19.0","channelGroup":"stable"},"networking":{}}}' | \
-		curl -s -X POST http://127.0.0.1:18081/apis/gcp.managed.openshift.io/v1/namespaces/test/clusters -H "Content-Type: application/json" -d @- | jq -r '.metadata.name // .message'
-	@echo "\n3. List with kubectl (Table format):"
-	@command -v kubectl >/dev/null && kubectl --server=http://127.0.0.1:18081 get clusters -n test || echo "kubectl not installed"
