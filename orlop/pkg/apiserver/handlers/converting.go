@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -20,8 +21,8 @@ import (
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -337,7 +338,11 @@ func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request)
 	wantsTable := false
 	acceptHeader := r.Header.Get("Accept")
 	for _, part := range strings.Split(acceptHeader, ",") {
-		if strings.Contains(part, "as=Table") {
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil {
+			continue
+		}
+		if mediaType == "application/json" && params["as"] == "Table" {
 			wantsTable = true
 			break
 		}
@@ -380,7 +385,9 @@ func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request)
 
 		w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(table)
+		if err := json.NewEncoder(w).Encode(table); err != nil {
+			h.logger.Error(err, "Failed to encode Table response", "kind", h.gvk.Kind)
+		}
 		return
 	}
 

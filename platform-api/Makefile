@@ -16,7 +16,7 @@ test:
 server-start:
 	@echo "Starting platform-api-server (memory backend)..."
 	@go build -o /tmp/platform-api-server ./cmd/platform-api-server
-	@nohup /tmp/platform-api-server --disable-auth --address=127.0.0.1 --private-port=18080 --public-port=18081 > /tmp/platform-api-server.log 2>&1 &
+	@env -u SPANNER_DATABASE -u DB_HOST nohup /tmp/platform-api-server --disable-auth --address=127.0.0.1 --private-port=18080 --public-port=18081 > /tmp/platform-api-server.log 2>&1 &
 	@sleep 2
 	@if pgrep -f "platform-api-server --disable-auth" > /dev/null; then \
 		echo "Server started (PID $$(pgrep -f 'platform-api-server --disable-auth'))"; \
