@@ -343,6 +343,10 @@ func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		if mediaType == "application/json" && params["as"] == "Table" {
+			// Check quality value - q=0 means "not acceptable"
+			if q := params["q"]; q != "" && q == "0" {
+				continue
+			}
 			wantsTable = true
 			break
 		}
