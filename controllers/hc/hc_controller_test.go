@@ -650,6 +650,40 @@ func TestReconcile_MWNotApplied_RequeuesPending(t *testing.T) {
 	require.Equal(t, 15*time.Second, result.RequeueAfter)
 }
 
+// TestReconcile_ResourcesApplied_NotYetAvailable_RequeuesPending verifies that when
+// resources are applied but HostedClusterAvailable is False, the reconciler keeps
+// polling at the pending interval instead of switching to the stable 5m interval.
+func TestReconcile_ResourcesApplied_NotYetAvailable_RequeuesPending(t *testing.T) {
+	clusterID := "cluster-abc"
+	mcName := "mc-cluster-1"
+
+	cluster := buildReadyCluster(clusterID, "4.15.0")
+
+	tr := mock.New()
+	tr.StatusOverrides[mcName+"/"+clusterID] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", LastTransitionTime: metav1.Now()},
+		},
+		// No HC feedback → HostedClusterAvailable stays False
+	}
+
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil)
+
+	result, err := r.Reconcile(context.Background(), clusterReq(clusterID))
+	require.NoError(t, err)
+	require.Equal(t, 15*time.Second, result.RequeueAfter, "should requeue at pending interval while HostedClusterAvailable is False")
+	require.True(t, storeClient.statusWriter.called)
+
+	// Verify the conditions were set correctly
+	captured := storeClient.statusWriter.captured.(*privatev1.Cluster)
+	ra := meta.FindStatusCondition(captured.Status.Conditions, "ResourcesApplied")
+	require.NotNil(t, ra)
+	require.Equal(t, metav1.ConditionTrue, ra.Status)
+	hca := meta.FindStatusCondition(captured.Status.Conditions, "HostedClusterAvailable")
+	require.NotNil(t, hca)
+	require.Equal(t, metav1.ConditionFalse, hca.Status)
+}
+
 // TestReconcile_ApplyConditions_Idempotent verifies that when the cluster's conditions
 // already match the current applied status, applyStatusConditions returns false and
 // Status.Update is not called.
@@ -678,7 +712,7 @@ func TestReconcile_ApplyConditions_Idempotent(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), clusterReq(clusterID))
 	require.NoError(t, err)
-	require.Equal(t, 5*time.Minute, result.RequeueAfter)
+	require.Equal(t, 15*time.Second, result.RequeueAfter) // HostedClusterAvailable=False → requeuePending
 	require.False(t, storeClient.statusWriter.called, "Status.Update should not be called when conditions are unchanged")
 }
 
@@ -738,7 +772,7 @@ func TestReconcile_WithServiceAccountsRef(t *testing.T) {
 
 	result, err := r.Reconcile(context.Background(), clusterReq(clusterID))
 	require.NoError(t, err)
-	require.Equal(t, 5*time.Minute, result.RequeueAfter) // ResourcesApplied=True → requeueStable
+	require.Equal(t, 15*time.Second, result.RequeueAfter) // ResourcesApplied=True but HostedClusterAvailable=False → requeuePending
 	require.Len(t, tr.ApplyCalls, 1)
 	require.True(t, storeClient.statusWriter.called)
 }

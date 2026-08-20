@@ -195,6 +195,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Infof(ctx, "hc-controller: cluster %s resources not yet applied, requeueing after %s", clusterID, requeuePending)
 		return reconcile.Result{RequeueAfter: requeuePending}, nil
 	}
+
+	if !meta.IsStatusConditionTrue(cluster.Status.Conditions, "HostedClusterAvailable") {
+		log.Infof(ctx, "hc-controller: cluster %s not yet available, requeueing after %s", clusterID, requeuePending)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
+	}
+
 	log.Infof(ctx, "hc-controller: cluster %s reconciled, requeueing after %s", clusterID, requeueStable)
 	return reconcile.Result{RequeueAfter: requeueStable}, nil
 }
