@@ -85,6 +85,7 @@ func setupConvertingHandlerTest(t *testing.T) (*ConvertingResourceHandler, *memo
 		"testobjects",
 		scheme,
 		scheme,
+		nil, // No printer columns
 		logger,
 	)
 
