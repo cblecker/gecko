@@ -191,3 +191,71 @@ func TestExtractResourceStatuses_CorruptKubeContent_ReturnsError(t *testing.T) {
 	_, err := extractResourceStatuses(reads)
 	require.Error(t, err)
 }
+
+func TestExtractNPFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected map[string]string
+		wantErr  bool
+	}{
+		{
+			name: "all conditions present",
+			input: `{
+				"status": {
+					"conditions": [
+						{"type": "Ready", "status": "True"},
+						{"type": "AllNodesHealthy", "status": "True"},
+						{"type": "AllMachinesReady", "status": "True"},
+						{"type": "UpdatingConfig", "status": "False"},
+						{"type": "UpdatingVersion", "status": "False"}
+					]
+				}
+			}`,
+			expected: map[string]string{
+				"readyCondition":              "True",
+				"allNodesHealthyCondition":    "True",
+				"allMachinesReadyCondition":   "True",
+				"updatingConfigCondition":     "False",
+				"updatingVersionCondition":    "False",
+			},
+		},
+		{
+			name: "partial conditions",
+			input: `{
+				"status": {
+					"conditions": [
+						{"type": "Ready", "status": "True"},
+						{"type": "AllMachinesReady", "status": "False"}
+					]
+				}
+			}`,
+			expected: map[string]string{
+				"readyCondition":            "True",
+				"allMachinesReadyCondition": "False",
+			},
+		},
+		{
+			name:     "empty conditions array",
+			input:    `{"status": {"conditions": []}}`,
+			expected: map[string]string{},
+		},
+		{
+			name:    "invalid JSON",
+			input:   `{bad`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields, err := extractNPFields([]byte(tt.input))
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, fields)
+		})
+	}
+}

@@ -291,7 +291,14 @@ func setWaitingNPConditions(np *privatev1.NodePool, reason, message string) bool
 		Message:            message,
 		ObservedGeneration: gen,
 	})
-	return a || b
+	c := meta.SetStatusCondition(&np.Status.Conditions, metav1.Condition{
+		Type:               "NodePoolProgressing",
+		Status:             metav1.ConditionUnknown,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: gen,
+	})
+	return a || b || c
 }
 
 // applyStatusConditions derives conditions from the resource status and writes them to the nodepool.
@@ -312,7 +319,13 @@ func (r *Reconciler) applyStatusConditions(np *privatev1.NodePool, mwStatus *tra
 			Reason:             "ResourcesNotFound",
 			ObservedGeneration: gen,
 		})
-		return a || b
+		c := meta.SetStatusCondition(&np.Status.Conditions, metav1.Condition{
+			Type:               "NodePoolProgressing",
+			Status:             metav1.ConditionFalse,
+			Reason:             "AsExpected",
+			ObservedGeneration: gen,
+		})
+		return a || b || c
 	}
 
 	// Extract conditions from top-level applied conditions.
@@ -329,14 +342,29 @@ func (r *Reconciler) applyStatusConditions(np *privatev1.NodePool, mwStatus *tra
 	// Extract resource status by NodePool resource identity key.
 	npKey := transport.ResourceKey(constants.HyperShiftGroup, constants.HyperShiftVersion, "nodepools",
 		fmt.Sprintf("clusters-%s", np.Spec.ClusterID), np.Name)
+	// rs is nil if npKey not in map; nil-safe below.
+	rs := mwStatus.ResourceStatuses[npKey]
 	availableStatus := "False"
 	allNodesHealthy := "False"
-	if rs, ok := mwStatus.ResourceStatuses[npKey]; ok {
+	// Empty string for progressing conditions: != "True" captures absent fields.
+	allMachinesReady := ""
+	updatingConfig := ""
+	updatingVersion := ""
+	if rs != nil {
 		if v, ok := rs["readyCondition"]; ok {
 			availableStatus = v
 		}
 		if v, ok := rs["allNodesHealthyCondition"]; ok {
 			allNodesHealthy = v
+		}
+		if v, ok := rs["allMachinesReadyCondition"]; ok {
+			allMachinesReady = v
+		}
+		if v, ok := rs["updatingConfigCondition"]; ok {
+			updatingConfig = v
+		}
+		if v, ok := rs["updatingVersionCondition"]; ok {
+			updatingVersion = v
 		}
 	}
 
@@ -370,7 +398,28 @@ func (r *Reconciler) applyStatusConditions(np *privatev1.NodePool, mwStatus *tra
 		Reason:             healthReason,
 		ObservedGeneration: gen,
 	})
-	return a || b || c
+
+	progressingStatus := metav1.ConditionFalse
+	progressingReason := "AsExpected"
+	switch {
+	case allMachinesReady != "True":
+		progressingStatus = metav1.ConditionTrue
+		progressingReason = "MachinesNotReady"
+	case updatingConfig == "True":
+		progressingStatus = metav1.ConditionTrue
+		progressingReason = "UpdatingConfig"
+	case updatingVersion == "True":
+		progressingStatus = metav1.ConditionTrue
+		progressingReason = "UpdatingVersion"
+	}
+
+	d := meta.SetStatusCondition(&np.Status.Conditions, metav1.Condition{
+		Type:               "NodePoolProgressing",
+		Status:             progressingStatus,
+		Reason:             progressingReason,
+		ObservedGeneration: gen,
+	})
+	return a || b || c || d
 }
 
 // defaultReplicas is the hardcoded default for this POC.

@@ -565,14 +565,15 @@ func TestConverter_FilterNonPublicConditions(t *testing.T) {
 						map[string]interface{}{"type": "NodePoolAvailable", "status": "True"},
 						map[string]interface{}{"type": "NodePoolResourcesApplied", "status": "True"},
 						map[string]interface{}{"type": "NodePoolHealthy", "status": "True"},
+						map[string]interface{}{"type": "NodePoolProgressing", "status": "False"},
 					},
 				}),
 			),
 			validate: func(t *testing.T, obj *unstructured.Unstructured) {
 				status := obj.Object["status"].(map[string]interface{})
 				conditions := status["conditions"].([]interface{})
-				if len(conditions) != 2 {
-					t.Errorf("Expected 2 conditions, got %d", len(conditions))
+				if len(conditions) != 3 {
+					t.Errorf("Expected 3 conditions, got %d", len(conditions))
 				}
 			},
 		},
