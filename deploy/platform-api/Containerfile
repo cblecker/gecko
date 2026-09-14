@@ -7,7 +7,7 @@ COPY orlop/ orlop/
 COPY platform-api/ platform-api/
 RUN cd platform-api && CGO_ENABLED=0 GOOS=linux go build -o /opt/app-root/src/platform-api-server ./cmd/platform-api-server
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1787778798
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8-1789345812
 
 LABEL name="gecko-platform-api-server" \
       com.redhat.component="gecko-platform-api-server" \
