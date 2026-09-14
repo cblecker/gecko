@@ -115,6 +115,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	placement := cluster.Status.PlacementResult
 	vr := cluster.Status.VersionResolution
+	safeName := cluster.Spec.SafeName
+	if safeName == "" {
+		safeName = privatev1.DefaultSafeName(cluster.Name, cluster.UID)
+	}
 
 	// Extract platform fields.
 	var gcpProjectID, gcpRegion, gcpNetwork, gcpSubnet, gcpEndpointAccess string
@@ -142,15 +146,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Build manifests.
-	// TODO: ClusterIDUUID and CreatedBy are not yet in the orlop ClusterSpec.
+	// TODO: CreatedBy is not yet in the orlop ClusterSpec.
 	mwInput := manifest.Input{
-		ClusterID:            req.Name,
-		ClusterName:          cluster.Name,
+		ClusterID:            string(cluster.UID),
+		ClusterName:          safeName,
 		Generation:           cluster.Generation,
 		CreatedBy:            cluster.Annotations[constants.AnnotationCreatedBy],
 		InfraID:              cluster.Spec.InfraID,
 		IssuerURL:            cluster.Spec.IssuerURL,
-		ClusterIDUUID:        string(cluster.UID),
 		GCPProjectID:         gcpProjectID,
 		GCPRegion:            gcpRegion,
 		GCPNetwork:           gcpNetwork,
@@ -331,8 +334,13 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 	appliedStatus, appliedReason, appliedMessage := firstCondition(mwStatus.Conditions, "Applied")
 
 	// Derive HostedClusterAvailable and HostedClusterResult fields from HC resource status.
+	clusterNS := fmt.Sprintf("clusters-%s", cluster.UID)
+	safeName := cluster.Spec.SafeName
+	if safeName == "" {
+		safeName = privatev1.DefaultSafeName(cluster.Name, cluster.UID)
+	}
 	hcKey := transport.ResourceKey(constants.HyperShiftGroup, constants.HyperShiftVersion, "hostedclusters",
-		fmt.Sprintf("clusters-%s", cluster.Name), cluster.Name)
+		clusterNS, safeName)
 	availableStatus := string(metav1.ConditionFalse)
 	apiEndpoint := ""
 	version := ""
@@ -349,7 +357,6 @@ func (r *Reconciler) applyStatusConditions(cluster *privatev1.Cluster, mwStatus 
 	}
 
 	// Derive ApiCertificateReady from Certificate resource status.
-	clusterNS := fmt.Sprintf("clusters-%s", cluster.Name)
 	certKey := transport.ResourceKey("cert-manager.io", "v1", "certificates", clusterNS, "external-api-cert")
 	certStatus := string(metav1.ConditionFalse)
 	certReason := "CertificateNotReady"

@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -178,11 +179,13 @@ func buildReadyCluster(clusterID, version string) *privatev1.Cluster {
 	c := &privatev1.Cluster{}
 	c.SetName(clusterID)
 	c.SetNamespace("hyperfleet")
+	c.SetUID(types.UID("550e8400-e29b-41d4-a716-446655440000"))
 	c.SetGeneration(2)
 	c.SetFinalizers([]string{constants.FinalizerCluster})
 	c.Spec = privatev1.ClusterSpec{
-		InfraID: "infra-xyz",
-		Release: privatev1.ReleaseSpec{Version: version},
+		SafeName: privatev1.DefaultSafeName(clusterID, c.UID),
+		InfraID:  "infra-xyz",
+		Release:  privatev1.ReleaseSpec{Version: version},
 		Platform: privatev1.ClusterPlatformSpec{
 			Type: "GCP",
 			GCP: &privatev1.GCPClusterPlatform{
@@ -205,6 +208,14 @@ func buildReadyCluster(clusterID, version string) *privatev1.Cluster {
 		},
 	}
 	return c
+}
+
+func clusterResourceKey(cluster *privatev1.Cluster, resource, name string) string {
+	return fmt.Sprintf("hypershift.openshift.io/v1beta1/%s/clusters-%s/%s", resource, cluster.UID, name)
+}
+
+func hostedClusterResourceKey(cluster *privatev1.Cluster) string {
+	return clusterResourceKey(cluster, "hostedclusters", cluster.Spec.SafeName)
 }
 
 // buildReconciler wires up an hc.Reconciler backed by the given store and transport.
@@ -488,7 +499,7 @@ func TestReconcile_HappyPath(t *testing.T) {
 	cluster := buildReadyCluster(clusterID, "4.15.0")
 
 	tr := mock.New()
-	hcKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/hostedclusters/clusters-%s/%s", clusterID, clusterID)
+	hcKey := hostedClusterResourceKey(cluster)
 	tr.StatusOverrides[mcName+"/"+groupKey] = &transport.Status{
 		Conditions: []metav1.Condition{
 			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", LastTransitionTime: metav1.Now()},
@@ -520,7 +531,7 @@ func TestReconcile_EndpointAccessPropagated(t *testing.T) {
 	cluster.Spec.Platform.GCP.EndpointAccess = "PublicAndPrivate"
 
 	tr := mock.New()
-	hcKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/hostedclusters/clusters-%s/%s", clusterID, clusterID)
+	hcKey := hostedClusterResourceKey(cluster)
 	tr.StatusOverrides[mcName+"/"+groupKey] = &transport.Status{
 		Conditions: []metav1.Condition{
 			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", LastTransitionTime: metav1.Now()},
@@ -545,6 +556,51 @@ func TestReconcile_EndpointAccessPropagated(t *testing.T) {
 	require.Equal(t, "PublicAndPrivate", gcp["endpointAccess"], "EndpointAccess from cluster spec should be propagated to the HostedCluster manifest")
 }
 
+// TestReconcile_UsesClusterUIDForHostedClusterIdentity verifies that the
+// management-cluster namespace, cluster-id label, and HostedCluster spec.clusterID
+// use the Gecko cluster UID while the HostedCluster object name uses spec.safeName.
+func TestReconcile_UsesClusterUIDForHostedClusterIdentity(t *testing.T) {
+	clusterID := "my-cluster-with-a-very-long-name"
+	clusterUID := "550e8400-e29b-41d4-a716-446655440000"
+	mcName := "mc-cluster-1"
+	groupKey := mustClusterGroupKey("hyperfleet", clusterID)
+
+	cluster := buildReadyCluster(clusterID, "4.15.0")
+	cluster.SetUID(types.UID(clusterUID))
+	cluster.Spec.SafeName = privatev1.DefaultSafeName(cluster.Name, cluster.UID)
+
+	tr := mock.New()
+	hcKey := hostedClusterResourceKey(cluster)
+	tr.StatusOverrides[mcName+"/"+groupKey] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", LastTransitionTime: metav1.Now()},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			hcKey: {"availableCondition": "True"},
+		},
+	}
+
+	r, _ := buildReconciler(t, cluster, nil, tr, nil)
+
+	_, err := r.Reconcile(context.Background(), clusterReq(clusterID))
+	require.NoError(t, err)
+	require.Len(t, tr.ApplyCalls, 1)
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(tr.ApplyCalls[0].Manifests[3], &obj))
+	metadata := obj["metadata"].(map[string]any)
+	require.Equal(t, cluster.Spec.SafeName, metadata["name"])
+	require.Equal(t, "my-cluster-with-a", metadata["name"])
+	require.Equal(t, "clusters-"+clusterUID, metadata["namespace"])
+	require.LessOrEqual(t, len(metadata["namespace"].(string)+"-"+metadata["name"].(string)), 63)
+
+	labels := metadata["labels"].(map[string]any)
+	require.Equal(t, clusterUID, labels["gcp.managed.openshift.io/cluster-id"])
+
+	spec := obj["spec"].(map[string]any)
+	require.Equal(t, clusterUID, spec["clusterID"])
+}
+
 // TestReconcile_HCFeedback_SetsHostedClusterResult verifies that controlPlaneEndpoint and
 // version fields from HC status feedback are written to cluster.Status.HostedClusterResult.
 func TestReconcile_HCFeedback_SetsHostedClusterResult(t *testing.T) {
@@ -555,7 +611,7 @@ func TestReconcile_HCFeedback_SetsHostedClusterResult(t *testing.T) {
 	cluster := buildReadyCluster(clusterID, "4.15.0")
 
 	tr := mock.New()
-	hcKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/hostedclusters/clusters-%s/%s", clusterID, clusterID)
+	hcKey := hostedClusterResourceKey(cluster)
 	tr.StatusOverrides[mcName+"/"+groupKey] = &transport.Status{
 		Conditions: []metav1.Condition{
 			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", LastTransitionTime: metav1.Now()},
@@ -595,7 +651,7 @@ func TestReconcile_CreatedByAnnotationPropagated(t *testing.T) {
 	})
 
 	tr := mock.New()
-	hcKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/hostedclusters/clusters-%s/%s", clusterID, clusterID)
+	hcKey := hostedClusterResourceKey(cluster)
 	tr.StatusOverrides[mcName+"/"+groupKey] = &transport.Status{
 		Conditions: []metav1.Condition{
 			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully", LastTransitionTime: metav1.Now()},

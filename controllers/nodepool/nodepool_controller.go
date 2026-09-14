@@ -163,13 +163,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if np.Spec.NodeCount != nil {
 		replicas = *np.Spec.NodeCount
 	}
+	safeName := cluster.Spec.SafeName
+	if safeName == "" {
+		safeName = privatev1.DefaultSafeName(cluster.Name, cluster.UID)
+	}
 
 	manifests, err := manifest.Build(manifest.Input{
 		NodePoolID:         nodepoolID,
 		NodePoolName:       np.Name,
 		NodePoolGeneration: np.Generation,
-		ClusterID:          clusterID,
-		ClusterName:        cluster.Name,
+		ClusterID:          string(cluster.UID),
+		ClusterName:        safeName,
 		Replicas:           replicas,
 		MachineType:        machineType,
 		GCPRegion:          gcpRegion,
@@ -202,7 +206,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Write nodepool status conditions — only update if something changed.
-	if r.applyStatusConditions(&np, mwStatus) {
+	if r.applyStatusConditions(&np, string(cluster.UID), mwStatus) {
 		if err := r.client.Status().Update(ctx, &np); err != nil {
 			if apierrors.IsConflict(err) {
 				return reconcile.Result{}, nil
@@ -328,7 +332,7 @@ func setWaitingNPConditions(np *privatev1.NodePool, reason, message string) bool
 
 // applyStatusConditions derives conditions from the resource status and writes them to the nodepool.
 // Returns true if any condition changed.
-func (r *Reconciler) applyStatusConditions(np *privatev1.NodePool, mwStatus *transport.Status) bool {
+func (r *Reconciler) applyStatusConditions(np *privatev1.NodePool, clusterID string, mwStatus *transport.Status) bool {
 	gen := np.Generation
 
 	if mwStatus == nil {
@@ -366,7 +370,7 @@ func (r *Reconciler) applyStatusConditions(np *privatev1.NodePool, mwStatus *tra
 
 	// Extract resource status by NodePool resource identity key.
 	npKey := transport.ResourceKey(constants.HyperShiftGroup, constants.HyperShiftVersion, "nodepools",
-		fmt.Sprintf("clusters-%s", np.Spec.ClusterID), np.Name)
+		fmt.Sprintf("clusters-%s", clusterID), np.Name)
 	// rs is nil if npKey not in map; nil-safe below.
 	rs := mwStatus.ResourceStatuses[npKey]
 	availableStatus := "False"

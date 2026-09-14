@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -218,7 +219,9 @@ func testCluster(placementReady, hcAvailable bool) *privatev1.Cluster {
 	c := &privatev1.Cluster{}
 	c.SetName("cluster-test")
 	c.SetNamespace("hyperfleet")
+	c.SetUID(types.UID("550e8400-e29b-41d4-a716-446655440000"))
 	c.Spec = privatev1.ClusterSpec{
+		SafeName: privatev1.DefaultSafeName("cluster-test", c.UID),
 		Platform: privatev1.ClusterPlatformSpec{
 			Type: "GCP",
 			GCP: &privatev1.GCPClusterPlatform{
@@ -239,6 +242,10 @@ func testCluster(placementReady, hcAvailable bool) *privatev1.Cluster {
 		}
 	}
 	return c
+}
+
+func nodePoolResourceKey(cluster *privatev1.Cluster, np *privatev1.NodePool) string {
+	return fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", cluster.UID, np.Name)
 }
 
 // buildReconciler wires up a nodepool Reconciler with injectable errors.
@@ -460,7 +467,7 @@ func TestReconcile_NodeCountHonored(t *testing.T) {
 	np.Spec.NodeCount = &count
 	cluster := testCluster(true, true)
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -479,13 +486,52 @@ func TestReconcile_NodeCountHonored(t *testing.T) {
 	require.Equal(t, int32(3), replicasFromManifests(t, tr.ApplyCalls[0].Manifests))
 }
 
+// TestReconcile_UsesClusterUIDForNodePoolIdentity verifies that the NodePool is
+// applied into the UID-backed HostedCluster namespace while spec.clusterName
+// references the parent Cluster object's private safeName.
+func TestReconcile_UsesClusterUIDForNodePoolIdentity(t *testing.T) {
+	np := testNodePool("4.16.0")
+	cluster := testCluster(true, true)
+	clusterUID := "550e8400-e29b-41d4-a716-446655440000"
+	cluster.SetUID(types.UID(clusterUID))
+	cluster.Spec.SafeName = privatev1.DefaultSafeName(cluster.Name, cluster.UID)
+
+	tr := mock.New()
+	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
+		Conditions: []metav1.Condition{
+			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
+		},
+		ResourceStatuses: map[string]map[string]string{
+			nodePoolResourceKey(cluster, np): {"readyCondition": "True", "allNodesHealthyCondition": "True", "allMachinesReadyCondition": "True"},
+		},
+	}
+
+	r, _ := buildReconciler(t, np, cluster, tr, nil, nil, nil)
+
+	_, err := r.Reconcile(context.Background(), npReq("cluster-test", "np-test"))
+	require.NoError(t, err)
+	require.Len(t, tr.ApplyCalls, 1)
+
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(tr.ApplyCalls[0].Manifests[0], &obj))
+	metadata := obj["metadata"].(map[string]any)
+	require.Equal(t, np.Name, metadata["name"])
+	require.Equal(t, "clusters-"+clusterUID, metadata["namespace"])
+
+	labels := metadata["labels"].(map[string]any)
+	require.Equal(t, clusterUID, labels["gcp.managed.openshift.io/cluster-id"])
+
+	spec := obj["spec"].(map[string]any)
+	require.Equal(t, cluster.Spec.SafeName, spec["clusterName"])
+}
+
 // TestReconcile_DefaultNodeCount verifies that when Spec.NodeCount is nil, defaultReplicas is used.
 func TestReconcile_DefaultNodeCount(t *testing.T) {
 	np := testNodePool("4.16.0")
 	np.Spec.NodeCount = nil
 	cluster := testCluster(true, true)
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -513,7 +559,7 @@ func TestReconcile_DefaultPlatformValues(t *testing.T) {
 
 	cluster := testCluster(true, true) // cluster has GCP.Region = "us-central1"
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -543,7 +589,7 @@ func TestReconcile_ZoneDerivedFromRegion(t *testing.T) {
 
 	cluster := testCluster(true, true) // cluster region = "us-central1"
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -616,7 +662,7 @@ func TestReconcile_HappyPath(t *testing.T) {
 
 	tr := mock.New()
 	npGroupKey := mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr.StatusOverrides["mc-us-c1/"+npGroupKey] = &transport.Status{
 		Conditions: []metav1.Condition{
 			{Type: "Applied", Status: metav1.ConditionTrue, Reason: "AppliedSuccessfully"},
@@ -664,7 +710,7 @@ func TestReconcile_MWNotApplied_RequeuesPending(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -706,7 +752,7 @@ func TestReconcile_ResourcesApplied_ClusterNotAvailable_RequeuesPending(t *testi
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, false) // placement ready, HC NOT available
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -732,7 +778,7 @@ func TestReconcile_ResourcesApplied_NodePoolNotAvailable_RequeuesPending(t *test
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true) // placement ready, HC available
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -768,7 +814,7 @@ func TestReconcile_StatusUpdateConflict_ReturnsNoError(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -815,7 +861,7 @@ func TestReconcile_StaleStatus_RequeuesPending(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
 
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
 		Conditions: []metav1.Condition{
@@ -1137,7 +1183,7 @@ func TestReconcile_Deletion_RemoveFinalizerError(t *testing.T) {
 func TestReconcile_Progressing_AllMachinesReadyFalse(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -1167,7 +1213,7 @@ func TestReconcile_Progressing_AllMachinesReadyFalse(t *testing.T) {
 func TestReconcile_Progressing_AllMachinesReadyAbsent(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -1197,7 +1243,7 @@ func TestReconcile_Progressing_AllMachinesReadyAbsent(t *testing.T) {
 func TestReconcile_Progressing_UpdatingConfig(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -1228,7 +1274,7 @@ func TestReconcile_Progressing_UpdatingConfig(t *testing.T) {
 func TestReconcile_Progressing_Priority_UpdatingConfigWins(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -1260,7 +1306,7 @@ func TestReconcile_Progressing_Priority_UpdatingConfigWins(t *testing.T) {
 func TestReconcile_Progressing_UpdatingVersion(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -1291,7 +1337,7 @@ func TestReconcile_Progressing_UpdatingVersion(t *testing.T) {
 func TestReconcile_Progressing_AsExpected(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{
@@ -1323,7 +1369,7 @@ func TestReconcile_Progressing_AsExpected(t *testing.T) {
 func TestReconcile_Progressing_Priority_MachinesNotReadyWins(t *testing.T) {
 	np := testNodePool("4.16.0")
 	cluster := testCluster(true, true)
-	npKey := fmt.Sprintf("hypershift.openshift.io/v1beta1/nodepools/clusters-%s/%s", np.Spec.ClusterID, np.Name)
+	npKey := nodePoolResourceKey(cluster, np)
 
 	tr := mock.New()
 	tr.StatusOverrides["mc-us-c1/"+mustNodePoolGroupKey("cluster-test", "cluster-test", "np-test")] = &transport.Status{

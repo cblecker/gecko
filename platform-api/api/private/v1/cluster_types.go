@@ -28,6 +28,10 @@ type ClusterList struct {
 
 // ClusterSpec is user-defined input only.
 type ClusterSpec struct {
+	// SafeName is a private, immutable, DNS-safe name used for downstream HyperShift resources.
+	// +kubebuilder:validation:MaxLength=17
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	SafeName string `json:"safeName,omitempty"`
 	// +orlop:public
 	InfraID string `json:"infraID,omitempty"`
 	// +orlop:public

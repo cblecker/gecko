@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
@@ -85,7 +86,11 @@ func TestIntegration_HC_ApplyAndStatusReadback(t *testing.T) {
 	defer transportClient.Close()
 
 	const clusterID = "cluster-integration"
+	const clusterUID = "550e8400-e29b-41d4-a716-446655440001"
 	cluster := buildReadyCluster(clusterID, "4.15.0")
+	cluster.SetUID(types.UID(clusterUID))
+	safeName := privatev1.DefaultSafeName(cluster.Name, cluster.UID)
+	cluster.Spec.SafeName = safeName
 	cluster.Status.PlacementResult.ManagementClusterName = project
 	groupKey := mustClusterGroupKey(cluster.Namespace, cluster.Name)
 	r, storeClient := buildReconciler(t, cluster, nil, transportClient, nil)
@@ -95,13 +100,16 @@ func TestIntegration_HC_ApplyAndStatusReadback(t *testing.T) {
 	require.Equal(t, 15*time.Second, result.RequeueAfter)
 	require.False(t, storeClient.statusWriter.called)
 
-	clusterNamespace := fmt.Sprintf("clusters-%s", clusterID)
+	clusterNamespace := fmt.Sprintf("clusters-%s", clusterUID)
 	expected := []hcExpectedResource{
 		{version: "v1", resource: "namespaces", name: clusterNamespace, kind: "Namespace"},
 		{group: "external-secrets.io", version: "v1", resource: "externalsecrets", namespace: clusterNamespace, name: "pull-secret", kind: "ExternalSecret"},
 		{group: "cert-manager.io", version: "v1", resource: "certificates", namespace: clusterNamespace, name: "external-api-cert", kind: "Certificate"},
-		{group: "hypershift.openshift.io", version: "v1beta1", resource: "hostedclusters", namespace: clusterNamespace, name: clusterID, kind: "HostedCluster"},
-		{group: "batch", version: "v1", resource: "jobs", namespace: fmt.Sprintf("clusters-%s-%s", clusterID, clusterID), name: "rbac-setup-gen-2", kind: "Job"},
+		{group: "hypershift.openshift.io", version: "v1beta1", resource: "hostedclusters", namespace: clusterNamespace, name: safeName, kind: "HostedCluster"},
+		{group: "batch", version: "v1", resource: "jobs", namespace: fmt.Sprintf("clusters-%s-%s", clusterUID, safeName), name: "rbac-setup-gen-2", kind: "Job"},
+	}
+	for _, resource := range expected {
+		require.LessOrEqual(t, len(resource.namespace), 63)
 	}
 	expectedByID := make(map[string]hcExpectedResource, len(expected))
 	for _, resource := range expected {

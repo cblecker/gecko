@@ -143,6 +143,12 @@ properties:
         - channelGroup
         - version
         type: object
+      safeName:
+        description: SafeName is a private, immutable, DNS-safe name used for downstream
+          HyperShift resources.
+        maxLength: 17
+        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+        type: string
     required:
     - networking
     - platform

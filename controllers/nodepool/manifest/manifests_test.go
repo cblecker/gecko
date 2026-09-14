@@ -12,8 +12,8 @@ func TestBuild_HappyPath(t *testing.T) {
 		NodePoolID:         "np-001",
 		NodePoolName:       "my-nodepool",
 		NodePoolGeneration: 3,
-		ClusterID:          "cluster-abc",
-		ClusterName:        "my-cluster",
+		ClusterID:          "550e8400-e29b-41d4-a716-446655440000",
+		ClusterName:        "my-cluster-safe",
 		Replicas:           2,
 		MachineType:        "n2-standard-8",
 		GCPRegion:          "us-central1",
@@ -40,10 +40,10 @@ func TestBuild_HappyPath(t *testing.T) {
 
 	meta := nodePool["metadata"].(map[string]any)
 	require.Equal(t, "my-nodepool", meta["name"])
-	require.Equal(t, "clusters-cluster-abc", meta["namespace"])
+	require.Equal(t, "clusters-550e8400-e29b-41d4-a716-446655440000", meta["namespace"])
 
 	metaLabels := meta["labels"].(map[string]any)
-	require.Equal(t, "cluster-abc", metaLabels["gcp.managed.openshift.io/cluster-id"])
+	require.Equal(t, "550e8400-e29b-41d4-a716-446655440000", metaLabels["gcp.managed.openshift.io/cluster-id"])
 	require.Equal(t, "np-001", metaLabels["gcp.managed.openshift.io/nodepool-id"])
 	require.Equal(t, "nodepool-controller", metaLabels["gcp.managed.openshift.io/managed-by"])
 
@@ -51,7 +51,7 @@ func TestBuild_HappyPath(t *testing.T) {
 	require.Equal(t, "3", metaAnnotations["gcp.managed.openshift.io/generation"])
 
 	spec := nodePool["spec"].(map[string]any)
-	require.Equal(t, "my-cluster", spec["clusterName"])
+	require.Equal(t, "my-cluster-safe", spec["clusterName"])
 	require.EqualValues(t, 2, spec["replicas"])
 	require.Equal(t, "amd64", spec["arch"])
 
