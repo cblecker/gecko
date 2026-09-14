@@ -18,12 +18,68 @@ linters:
     - usestdlibvars
     - errcheck
     - unused
+    - kubeapilinter
   # staticcheck (honnef.co/go/tools@v0.7.0) panics on go1.27 IR constructs
   # (*ast.KeyValueExpr in the poll package). Disable until the upstream library
   # adds go1.27 support.
   disable:
     - staticcheck
   settings:
+    custom:
+      kubeapilinter:
+        path: hack/tools/bin/kube-api-linter.so
+        description: >
+          kubeapilinter lints Kubernetes-style API types based on API conventions
+          and best practices. See sigs.k8s.io/kube-api-linter.
+        settings:
+          linters:
+            enable:
+              - arrayofstruct
+              - conditions
+              - defaultorrequired
+              - defaults
+              - duplicatemarkers
+              - integers
+              - jsontags
+              - nobools
+              - nodurations
+              - nofloats
+              - nomaps
+              - nonullable
+              - nophase
+              - noreferences
+              - notimestamp
+              - optionalfields
+              - optionalorrequired
+              - requiredfields
+              - ssatags
+              - statussubresource
+              - uniquemarkers
+            # commentstart requires every field to have a godoc comment starting
+            # with the JSON field name — valuable but requires a large separate
+            # effort to fix across all existing types.
+            disable:
+              - commentstart
+              # nonpointerstructs is designed for native Kubernetes types; not
+              # applicable to CRD-based APIs.
+              - nonpointerstructs
+          lintersConfig:
+            conditions:
+              isFirstField: Warn
+              # orlop only serves CRDs, not proto-serialised native types.
+              usePatchStrategy: Warn
+              useProtobuf: Warn
+            optionalfields:
+              pointers:
+                preference: WhenRequired
+                policy: Warn
+              omitEmpty:
+                policy: Warn
+            requiredfields:
+              pointers:
+                policy: Warn
+              omitempty:
+                policy: Warn
     gocyclo:
       min-complexity: 30
     govet:
@@ -187,6 +243,19 @@ linters:
       - linters:
           - usestdlibvars
         path: '_test\.go$'
+
+      # ── kubeapilinter ────────────────────────────────────────────────────
+      # kubeapilinter only applies to Kubernetes API type definitions.
+      # The orlop pkg/ directory contains internal framework implementation
+      # code that is not subject to Kubernetes API conventions.
+      - linters:
+          - kubeapilinter
+        path: '^(pkg|cmd|test)/'
+      # The orlop test API types (apis/private/test/, apis/public/test/) are
+      # minimal test fixtures, not production API types.
+      - linters:
+          - kubeapilinter
+        path: '^apis/'
 
     paths:
       - apis/public/

@@ -18,12 +18,69 @@ linters:
     - usestdlibvars
     - errcheck
     - unused
+    - kubeapilinter
   # staticcheck (honnef.co/go/tools@v0.7.0) panics on go1.27 IR constructs
   # (*ast.KeyValueExpr in the poll package). Disable until the upstream library
   # adds go1.27 support.
   disable:
     - staticcheck
   settings:
+    custom:
+      kubeapilinter:
+        # Path is relative to the config file (platform-api/.golangci.yml).
+        path: ../orlop/hack/tools/bin/kube-api-linter.so
+        description: >
+          kubeapilinter lints Kubernetes-style API types based on API conventions
+          and best practices. See sigs.k8s.io/kube-api-linter.
+        settings:
+          linters:
+            enable:
+              - arrayofstruct
+              - conditions
+              - defaultorrequired
+              - defaults
+              - duplicatemarkers
+              - integers
+              - jsontags
+              - nobools
+              - nodurations
+              - nofloats
+              - nomaps
+              - nonullable
+              - nophase
+              - noreferences
+              - notimestamp
+              - optionalfields
+              - optionalorrequired
+              - requiredfields
+              - ssatags
+              - statussubresource
+              - uniquemarkers
+            # commentstart requires every field to have a godoc comment starting
+            # with the JSON field name — valuable but requires a large separate
+            # effort to fix across all existing types.
+            disable:
+              - commentstart
+              # nonpointerstructs is designed for native Kubernetes types; not
+              # applicable to CRD-based APIs.
+              - nonpointerstructs
+          lintersConfig:
+            conditions:
+              isFirstField: Warn
+              # platform-api only serves CRDs, not proto-serialised native types.
+              usePatchStrategy: Warn
+              useProtobuf: Warn
+            optionalfields:
+              pointers:
+                preference: WhenRequired
+                policy: Warn
+              omitEmpty:
+                policy: Warn
+            requiredfields:
+              pointers:
+                policy: Warn
+              omitempty:
+                policy: Warn
     gocyclo:
       min-complexity: 30
     govet:
@@ -68,6 +125,47 @@ linters:
       - linters:
           - unparam
         path: '_test\.go$'
+      # ── kubeapilinter ────────────────────────────────────────────────────
+      # arrayofstruct: GCPResourceLabel, MachineNetworkEntry, ClusterNetworkEntry,
+      # and NodePoolSpec.Taints are all intentional list-of-struct designs where
+      # the struct members form a natural key/value pair. Marking them required
+      # is a separate improvement tracked as a future enhancement.
+      - linters:
+          - kubeapilinter
+        text: 'arrayofstruct: .*\.(ResourceLabels|MachineNetwork|ClusterNetwork|Taints) is an array of structs'
+
+      # TODO(kubeapilinter): Review and fix these linting errors.
+      # These exceptions baseline findings that require non-trivial API changes
+      # (pointer conversions, MinLength additions, omitzero tags, struct tags).
+      # Each should be evaluated and either fixed or permanently excepted.
+
+      # optionalfields: optional string fields without MinLength validation should
+      # be pointers — fixing requires adding MinLength or converting to *string.
+      - linters:
+          - kubeapilinter
+        text: 'optionalfields: field .* has a valid zero value'
+
+      # optionalfields/requiredfields: struct fields need omitzero tag — a
+      # separate effort as it requires regenerating the public API.
+      - linters:
+          - kubeapilinter
+        text: '(optionalfields|requiredfields): field .* does not allow the zero value'
+
+      # optionalfields: *AutoscalingSpec needs omitzero — tracked separately.
+      - linters:
+          - kubeapilinter
+        text: 'optionalfields: field NodePoolSpec.Autoscaling does not allow the zero value'
+
+      # requiredfields: required struct fields should use omitzero — tracked separately.
+      - linters:
+          - kubeapilinter
+        text: 'requiredfields: field .* (should have the omitempty tag|has a valid zero value)'
+
+      # conditions: struct tag should include patchStrategy/patchMergeKey/protobuf.
+      # These are servo-side-apply and protobuf annotations. Tracked separately.
+      - linters:
+          - kubeapilinter
+        text: 'conditions: Conditions field .* has incorrect tags'
     paths:
       - api/public/
 
