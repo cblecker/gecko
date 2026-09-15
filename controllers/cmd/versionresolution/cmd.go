@@ -4,12 +4,12 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	ctrl "sigs.k8s.io/controller-runtime"
-
-	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
 	"github.com/openshift-online/gecko/controllers/util/setup"
 	"github.com/openshift-online/gecko/controllers/versionresolution"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // NewCommand returns the version-resolution subcommand.

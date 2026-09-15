@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/openshift-online/gecko/controllers/util/constants"
+	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // aggregateConditions derives a single "Applied" metav1.Condition from the

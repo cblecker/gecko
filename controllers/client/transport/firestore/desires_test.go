@@ -3,9 +3,10 @@ package firestore
 import (
 	"testing"
 
-	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
 )
 
 func TestParseManifest_HostedCluster(t *testing.T) {

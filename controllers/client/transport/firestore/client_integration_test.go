@@ -22,6 +22,7 @@ import (
 	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
 	"github.com/openshift-online/gecko/controllers/util/logger"
 	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

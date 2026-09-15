@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -55,7 +56,7 @@ func (e *APIError) Unwrap() error {
 
 // IsTimeout returns true if the error was caused by a timeout
 func (e *APIError) IsTimeout() bool {
-	return e.StatusCode == 408 || errors.Is(e.Err, context.DeadlineExceeded)
+	return e.StatusCode == http.StatusRequestTimeout || errors.Is(e.Err, context.DeadlineExceeded)
 }
 
 // IsServerError returns true if the error was a server error (5xx)
@@ -70,32 +71,32 @@ func (e *APIError) IsClientError() bool {
 
 // IsNotFound returns true if the error was a 404 Not Found
 func (e *APIError) IsNotFound() bool {
-	return e.StatusCode == 404
+	return e.StatusCode == http.StatusNotFound
 }
 
 // IsUnauthorized returns true if the error was a 401 Unauthorized
 func (e *APIError) IsUnauthorized() bool {
-	return e.StatusCode == 401
+	return e.StatusCode == http.StatusUnauthorized
 }
 
 // IsForbidden returns true if the error was a 403 Forbidden
 func (e *APIError) IsForbidden() bool {
-	return e.StatusCode == 403
+	return e.StatusCode == http.StatusForbidden
 }
 
 // IsRateLimited returns true if the error was a 429 Too Many Requests
 func (e *APIError) IsRateLimited() bool {
-	return e.StatusCode == 429
+	return e.StatusCode == http.StatusTooManyRequests
 }
 
 // IsBadRequest returns true if the error was a 400 Bad Request
 func (e *APIError) IsBadRequest() bool {
-	return e.StatusCode == 400
+	return e.StatusCode == http.StatusBadRequest
 }
 
 // IsConflict returns true if the error was a 409 Conflict
 func (e *APIError) IsConflict() bool {
-	return e.StatusCode == 409
+	return e.StatusCode == http.StatusConflict
 }
 
 // -----------------------------------------------------------------------------

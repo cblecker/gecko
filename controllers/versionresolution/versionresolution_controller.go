@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-online/gecko/controllers/util/logger"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
-
-	"github.com/openshift-online/gecko/controllers/util/logger"
 )
 
 const (
