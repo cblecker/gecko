@@ -574,7 +574,10 @@ func TestFinalizerDeletion(t *testing.T) {
 		}
 
 		// Object should still exist with deletionTimestamp
-		getResp, _ := insecureClient.Get(baseURL + "/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/" + namespace + "/objects/" + name)
+		getResp, err := insecureClient.Get(baseURL + "/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/" + namespace + "/objects/" + name)
+		if err != nil {
+			t.Fatalf("Get request failed: %v", err)
+		}
 		defer getResp.Body.Close()
 
 		if getResp.StatusCode != http.StatusOK {
