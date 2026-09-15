@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
-	"golang.org/x/net/http2"
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/aggregated"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
@@ -184,21 +183,19 @@ func New(opts Options) (*Server, error) {
 		converter := conversion.NewConverter(opts.Public.Scheme, opts.Private.Scheme, opts.Private.Prefix)
 		publicRouter := setupConvertingRouter(publicRegistry, privateRegistry, converter, opts.Private.Scheme, opts.CORSOrigins, opts.Public.Middleware, publicHealthCheck)
 
+		// Enable HTTP/1 and HTTP/2 on the public server.
+		var protocols http.Protocols
+		protocols.SetHTTP1(true)
+		protocols.SetHTTP2(true)
+
 		publicServer := &http.Server{
 			Addr:              fmt.Sprintf("%s:%d", bindAddress, opts.Public.Port),
 			Handler:           publicRouter,
+			Protocols:         &protocols,
 			ReadHeaderTimeout: 30 * time.Second, // prevent slow loris
 			ReadTimeout:       60 * time.Second, // max 1min per request (including watch streams)
 			WriteTimeout:      60 * time.Second, // max 1min response write (forces watch reconnect)
 			IdleTimeout:       90 * time.Second, // connection reuse between requests
-		}
-
-		// Configure HTTP/2 with keep-alive
-		http2Server := &http2.Server{
-			IdleTimeout: 90 * time.Second,
-		}
-		if err := http2.ConfigureServer(publicServer, http2Server); err != nil {
-			return nil, fmt.Errorf("failed to configure HTTP/2: %w", err)
 		}
 
 		server.publicRouter = publicRouter
@@ -210,11 +207,17 @@ func New(opts Options) (*Server, error) {
 
 // Run starts the API server(s).
 func (s *Server) Run() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-s.stopCh
+		cancel()
+	}()
+
 	errCh := make(chan error, 2)
 	go func() {
 		s.logger.Info("Private API server starting", "port", s.options.Private.Port)
 		prepared := s.aggregatedServer.PrepareRun()
-		errCh <- prepared.Run(s.stopCh)
+		errCh <- prepared.RunWithContext(ctx)
 	}()
 
 	if s.options.Public.Enable && s.publicServer != nil {
