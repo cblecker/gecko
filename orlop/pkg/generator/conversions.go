@@ -259,8 +259,7 @@ func (g *Generator) cleanStaleConversionArtifacts() error {
 		if base == "doc.go" {
 			content, err := os.ReadFile(path)
 			if err != nil {
-				// Unreadable doc.go — skip rather than fail the walk.
-				return nil //nolint:nilerr // intentionally ignoring read error
+				return fmt.Errorf("reading %s: %w", path, err)
 			}
 			if strings.Contains(string(content), "+k8s:conversion-gen") {
 				fmt.Printf("  Removing stale %s\n", path)

@@ -99,11 +99,17 @@ func TestWatchAdapterStop(t *testing.T) {
 	// Close the input channel so the goroutine terminates and result channel closes.
 	close(ch)
 
-	select {
-	case <-w.ResultChan():
-		// Drain any residual; the channel should eventually close.
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for result channel to close after Stop()")
+	// Drain until the channel is closed (ok == false), proving the goroutine exited.
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-w.ResultChan():
+			if !ok {
+				return // success: channel closed
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for result channel to close after Stop()")
+		}
 	}
 }
 

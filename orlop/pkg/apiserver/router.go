@@ -36,7 +36,7 @@ func registerHealthEndpoints(r chi.Router, check healthChecker) {
 // setupConvertingRouter configures the HTTP router with converting handlers for public API.
 // publicRegistry defines the public API types and schemas.
 // privateRegistry provides the shared storage backend.
-func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *ResourceRegistry, converter *conversion.Converter, privateScheme *runtime.Scheme, corsOrigins []string, customMiddleware []func(http.Handler) http.Handler, check healthChecker) chi.Router {
+func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *ResourceRegistry, converter *conversion.Converter, privateScheme *runtime.Scheme, corsOrigins []string, customMiddleware []func(http.Handler) http.Handler, check healthChecker) (chi.Router, error) {
 	r := chi.NewRouter()
 
 	// Add CORS middleware
@@ -70,6 +70,10 @@ func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *Re
 	}
 
 	// Setup routes for each GroupVersion
+	// Errors from handler construction are captured here and returned
+	// after all routes are processed, so a misconfigured resource is
+	// never silently advertised in discovery with no routes.
+	var routeErr error
 	for gv, resources := range gvResources {
 		group := resources[0].GVK.Group
 		version := resources[0].GVK.Version
@@ -88,7 +92,8 @@ func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *Re
 				}
 				handlerInterface, err := createConvertingHandlerWithSharedStore(publicRegistry, privateRegistry, converter, privateScheme, res)
 				if err != nil {
-					continue
+					routeErr = fmt.Errorf("resource %s/%s %s: %w", res.GVK.Group, res.GVK.Version, res.Plural, err)
+					return
 				}
 				handler := handlerInterface.(*handlers.ConvertingResourceHandler)
 				plural := res.Plural
@@ -114,7 +119,8 @@ func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *Re
 				}
 				handlerInterface, err := createConvertingHandlerWithSharedStore(publicRegistry, privateRegistry, converter, privateScheme, res)
 				if err != nil {
-					continue
+					routeErr = fmt.Errorf("resource %s/%s %s: %w", res.GVK.Group, res.GVK.Version, res.Plural, err)
+					return
 				}
 				handler := handlerInterface.(*handlers.ConvertingResourceHandler)
 				r.Get("/"+res.Plural, handler.List)
@@ -152,6 +158,10 @@ func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *Re
 			}
 		})
 
+		if routeErr != nil {
+			return nil, fmt.Errorf("setting up converting routes: %w", routeErr)
+		}
+
 		// Per-group discovery endpoint
 		r.Get("/apis/"+group, func(w http.ResponseWriter, req *http.Request) {
 			discoveryHandler.APIGroup(w, req, group)
@@ -163,5 +173,5 @@ func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *Re
 		})
 	}
 
-	return r
+	return r, nil
 }

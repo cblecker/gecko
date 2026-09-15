@@ -181,7 +181,10 @@ func New(opts Options) (*Server, error) {
 		}
 
 		converter := conversion.NewConverter(opts.Public.Scheme, opts.Private.Scheme, opts.Private.Prefix)
-		publicRouter := setupConvertingRouter(publicRegistry, privateRegistry, converter, opts.Private.Scheme, opts.CORSOrigins, opts.Public.Middleware, publicHealthCheck)
+		publicRouter, err := setupConvertingRouter(publicRegistry, privateRegistry, converter, opts.Private.Scheme, opts.CORSOrigins, opts.Public.Middleware, publicHealthCheck)
+		if err != nil {
+			return nil, fmt.Errorf("failed to configure public API router: %w", err)
+		}
 
 		// Enable HTTP/1 and HTTP/2 on the public server.
 		var protocols http.Protocols
