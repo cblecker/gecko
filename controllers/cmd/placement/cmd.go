@@ -7,12 +7,12 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"github.com/spf13/cobra"
-	ctrl "sigs.k8s.io/controller-runtime"
-
-	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
 	placement "github.com/openshift-online/gecko/controllers/placement"
 	"github.com/openshift-online/gecko/controllers/util/setup"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func envOr(key, fallback string) string {

@@ -8,19 +8,19 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
-	"github.com/openshift-online/kube-applier-gcp/pkg/desireid"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
+	"github.com/openshift-online/kube-applier-gcp/pkg/desireid"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
-
-	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
 )
 
 type hcExpectedResource struct {

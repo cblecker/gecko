@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/openshift-online/gecko/controllers/hc/manifest"
 	"github.com/stretchr/testify/require"
+
+	"github.com/openshift-online/gecko/controllers/hc/manifest"
 )
 
 func testInput() manifest.Input {

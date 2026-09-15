@@ -4,13 +4,13 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	ctrl "sigs.k8s.io/controller-runtime"
-
-	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
 	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
 	nodepool "github.com/openshift-online/gecko/controllers/nodepool"
 	"github.com/openshift-online/gecko/controllers/util/setup"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // NewCommand returns the nodepool subcommand.

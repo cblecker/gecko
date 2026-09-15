@@ -73,4 +73,3 @@ const (
 	// HyperShiftVersion is the API version for HyperShift resources.
 	HyperShiftVersion = "v1beta1"
 )
-

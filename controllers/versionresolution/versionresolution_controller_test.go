@@ -9,16 +9,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/openshift-online/gecko/controllers/util/logger"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
-
-	"github.com/openshift-online/gecko/controllers/util/logger"
 )
 
 // ---- helpers ----------------------------------------------------------------
@@ -184,8 +185,8 @@ func TestReconciler_AlreadyResolved(t *testing.T) {
 	cluster.SetNamespace("hyperfleet")
 	cluster.Spec.Release = privatev1.ReleaseSpec{Version: "4.22.0-ec.4"}
 	cluster.Status.VersionResolution = &privatev1.VersionResolutionResult{
-		ReleaseImage:   "quay.io/openshift-release-dev/ocp-release:4.22.0-ec.4-x86_64",
-		ReleaseVersion: "4.22.0-ec.4",
+		ReleaseImage:      "quay.io/openshift-release-dev/ocp-release:4.22.0-ec.4-x86_64",
+		ReleaseVersion:    "4.22.0-ec.4",
 		CincinnatiChannel: "candidate-4.22",
 	}
 

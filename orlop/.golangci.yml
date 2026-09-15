@@ -27,7 +27,7 @@ linters:
   settings:
     custom:
       kubeapilinter:
-        path: hack/tools/bin/kube-api-linter.so
+        path: ../hack/tools/bin/kube-api-linter.so
         description: >
           kubeapilinter lints Kubernetes-style API types based on API conventions
           and best practices. See sigs.k8s.io/kube-api-linter.
@@ -169,10 +169,6 @@ linters:
           - misspell
         text: '`(signalling|cancelled)` is a misspelling'
         path: '^pkg/apiserver/storage/spanner/'
-      - linters:
-          - misspell
-        text: '`cancelled` is a misspelling'
-        path: '_test\.go$'
 
       # ── nilerr ────────────────────────────────────────────────────────────
       # Existing nilerr in conversions.go — fix separately.
@@ -200,10 +196,6 @@ linters:
           - unparam
         text: 'result .* \(error\) is always nil'
         path: '^pkg/apiserver/(aggregated/table|router)\.go$'
-      - linters:
-          - unparam
-        text: '- result 1 \(error\) is always nil'
-        path: '^pkg/apiserver/router\.go$'
       # Existing unused parameter in handler — fix in a separate PR.
       - linters:
           - unparam
@@ -224,10 +216,6 @@ linters:
       - linters:
           - unused
         text: 'var localSchemeBuilder is unused'
-      # Unused struct fields throughout existing code — fix separately.
-      - linters:
-          - unused
-        text: 'field .* is unused'
       # Unused helper functions kept for future use.
       - linters:
           - unused
@@ -271,12 +259,10 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/openshift-online/gecko)
+        - prefix(github.com/openshift-online)
         - prefix(k8s.io)
         - prefix(sigs.k8s.io)
       custom-order: true
   exclusions:
     warn-unused: true
     generated: lax
-    paths:
-      - apis/public/
