@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+inheritance: true
+
+reviews:
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+  tools:
+    # Run through make lint, which builds the required Go plugin.
+    golangci-lint:
+      enabled: false
