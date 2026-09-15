@@ -1,18 +1,8 @@
-.PHONY: lint
-lint:
-	$(MAKE) -C orlop lint; orlop_rc=$$?; \
-	$(MAKE) -C platform-api lint; api_rc=$$?; \
-	exit $$(( orlop_rc > api_rc ? orlop_rc : api_rc ))
-
-.PHONY: lint-fix
-lint-fix:
-	$(MAKE) -C orlop lint-fix
-	$(MAKE) -C platform-api lint-fix
-
-.PHONY: lint-fmt
-lint-fmt:
-	$(MAKE) -C orlop lint-fmt
-	$(MAKE) -C platform-api lint-fmt
+.PHONY: lint lint-fix lint-fmt
+lint lint-fix lint-fmt:
+	@rc=0; for module in orlop platform-api controllers; do \
+		$(MAKE) -C $$module $@ || rc=1; \
+	done; exit $$rc
 
 .PHONY: test
 test:

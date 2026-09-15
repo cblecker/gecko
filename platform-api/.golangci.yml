@@ -28,7 +28,7 @@ linters:
     custom:
       kubeapilinter:
         # Path is relative to the config file (platform-api/.golangci.yml).
-        path: ../orlop/hack/tools/bin/kube-api-linter.so
+        path: ../hack/tools/bin/kube-api-linter.so
         description: >
           kubeapilinter lints Kubernetes-style API types based on API conventions
           and best practices. See sigs.k8s.io/kube-api-linter.
@@ -112,19 +112,12 @@ linters:
           - errcheck
         text: 'Error return value is not checked'
         source: 'AddToScheme'
-      - linters:
-          - errcheck
-        path: '_test\.go$'
       # ── unused ────────────────────────────────────────────────────────────
       # localSchemeBuilder is a side-effect assignment in the scheme registration
       # pattern required by controller-runtime.
       - linters:
           - unused
         text: 'var localSchemeBuilder is unused'
-      # ── unparam ───────────────────────────────────────────────────────────
-      - linters:
-          - unparam
-        path: '_test\.go$'
       # ── kubeapilinter ────────────────────────────────────────────────────
       # arrayofstruct: GCPResourceLabel, MachineNetworkEntry, ClusterNetworkEntry,
       # and NodePoolSpec.Taints are all intentional list-of-struct designs where
@@ -151,11 +144,6 @@ linters:
           - kubeapilinter
         text: '(optionalfields|requiredfields): field .* does not allow the zero value'
 
-      # optionalfields: *AutoscalingSpec needs omitzero — tracked separately.
-      - linters:
-          - kubeapilinter
-        text: 'optionalfields: field NodePoolSpec.Autoscaling does not allow the zero value'
-
       # requiredfields: required struct fields should use omitzero — tracked separately.
       - linters:
           - kubeapilinter
@@ -180,12 +168,10 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/openshift-online/gecko)
+        - prefix(github.com/openshift-online)
         - prefix(k8s.io)
         - prefix(sigs.k8s.io)
       custom-order: true
   exclusions:
     warn-unused: true
     generated: lax
-    paths:
-      - api/public/

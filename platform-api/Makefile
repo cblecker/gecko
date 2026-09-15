@@ -1,38 +1,4 @@
-# The tools module lives in orlop/hack/tools (shared across the repo).
-TOOLS_DIR     := ../orlop/hack/tools
-TOOLS_BIN_DIR := $(TOOLS_DIR)/bin
-
-GOLANGCI_LINT        := $(abspath $(TOOLS_BIN_DIR)/golangci-lint)
-KUBEAPILINTER_PLUGIN := $(abspath $(TOOLS_BIN_DIR)/kube-api-linter.so)
-
-# Build golangci-lint from the pinned tools module (shared with orlop).
-$(GOLANGCI_LINT): $(TOOLS_DIR)/go.mod
-	@mkdir -p $(TOOLS_BIN_DIR)
-	cd $(TOOLS_DIR); go build -tags=tools -o $(abspath $(GOLANGCI_LINT)) github.com/golangci/golangci-lint/v2/cmd/golangci-lint
-
-# Build kube-api-linter as a golangci-lint plugin (requires CGO).
-$(KUBEAPILINTER_PLUGIN): $(TOOLS_DIR)/go.mod
-	@mkdir -p $(TOOLS_BIN_DIR)
-	cd $(TOOLS_DIR); CGO_ENABLED=1 go build -tags=tools -buildmode=plugin -o $(abspath $(KUBEAPILINTER_PLUGIN)) sigs.k8s.io/kube-api-linter/pkg/plugin
-
-# When not otherwise set, diff/lint against the upstream main branch.
-# This is always set in OpenShift CI.
-UPSTREAM_REMOTE ?= $(shell git remote -v 2>/dev/null | grep 'openshift-online/gecko.*fetch' | head -1 | cut -f1)
-PULL_BASE_SHA ?= $(if $(UPSTREAM_REMOTE),$(shell git rev-parse $(UPSTREAM_REMOTE)/main 2>/dev/null),$(shell git rev-parse main 2>/dev/null))
-
-.PHONY: lint
-lint: $(GOLANGCI_LINT) $(KUBEAPILINTER_PLUGIN)
-	$(GOLANGCI_LINT) run --config ./.golangci.yml --modules-download-mode=readonly -v \
-		$(if $(PULL_BASE_SHA),--new-from-rev=$(PULL_BASE_SHA))
-
-.PHONY: lint-fix
-lint-fix: $(GOLANGCI_LINT) $(KUBEAPILINTER_PLUGIN)
-	$(GOLANGCI_LINT) run --config ./.golangci.yml --fix -v \
-		$(if $(PULL_BASE_SHA),--new-from-rev=$(PULL_BASE_SHA) --whole-files)
-
-.PHONY: lint-fmt
-lint-fmt: $(GOLANGCI_LINT)
-	$(GOLANGCI_LINT) fmt --config ./.golangci.yml
+include ../hack/lint.mk
 
 .PHONY: generate build test server-start server-stop server-logs
 

@@ -1,4 +1,4 @@
-.PHONY: build test lint
+.PHONY: build test
 
 BINARY_NAME=gecko-controllers
 
@@ -8,5 +8,4 @@ build:
 test:
 	go test ./...
 
-lint:
-	golangci-lint run ./...
+include ../hack/lint.mk
