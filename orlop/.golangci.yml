@@ -19,11 +19,6 @@ linters:
     - errcheck
     - unused
     - kubeapilinter
-  # staticcheck (honnef.co/go/tools@v0.7.0) panics on go1.27 IR constructs
-  # (*ast.KeyValueExpr in the poll package). Disable until the upstream library
-  # adds go1.27 support.
-  disable:
-    - staticcheck
   settings:
     custom:
       kubeapilinter:
