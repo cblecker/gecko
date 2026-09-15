@@ -302,7 +302,7 @@ func (d *defaulterObject) Default(_ context.Context) error {
 
 func (d *defaulterObject) DeepCopyObject() runtime.Object {
 	cp := *d
-	cp.Object = *d.Object.DeepCopy()
+	cp.Object = *d.DeepCopy()
 	return &cp
 }
 
@@ -383,7 +383,7 @@ func (v *validatorObject) ValidateDelete(_ context.Context) error {
 
 func (v *validatorObject) DeepCopyObject() runtime.Object {
 	cp := *v
-	cp.Object = *v.Object.DeepCopy()
+	cp.Object = *v.DeepCopy()
 	return &cp
 }
 

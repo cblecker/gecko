@@ -704,12 +704,8 @@ func TestMemoryStore_ContextFilter(t *testing.T) {
 			t.Errorf("Expected ADDED event, got %s", event.Type)
 		}
 
-		eventObj, ok := event.Object.(client.Object)
-		if !ok {
-			t.Fatal("Event object is not client.Object")
-		}
-		if eventObj.GetName() != "a-obj" {
-			t.Errorf("Expected event for a-obj, got %s", eventObj.GetName())
+		if event.Object.GetName() != "a-obj" {
+			t.Errorf("Expected event for a-obj, got %s", event.Object.GetName())
 		}
 	})
 

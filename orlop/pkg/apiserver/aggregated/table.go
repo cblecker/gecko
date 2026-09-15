@@ -155,9 +155,7 @@ func extractItems(obj runtime.Object) []runtime.Object {
 	if err == nil {
 		// Successfully extracted list (may be empty)
 		result := make([]runtime.Object, len(items))
-		for i, item := range items {
-			result[i] = item
-		}
+		copy(result, items)
 		return result
 	}
 

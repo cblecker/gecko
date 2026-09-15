@@ -100,10 +100,8 @@ func TestWatchAdapterStop(t *testing.T) {
 	close(ch)
 
 	select {
-	case _, ok := <-w.ResultChan():
-		if ok {
-			// Drain any residual; the channel should eventually close.
-		}
+	case <-w.ResultChan():
+		// Drain any residual; the channel should eventually close.
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for result channel to close after Stop()")
 	}

@@ -204,7 +204,7 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 	source.WriteString("package " + pkg + "\n\n")
 	source.WriteString("import (\n")
 	source.WriteString("\t_ \"embed\"\n\n")
-	source.WriteString(fmt.Sprintf("\t%q\n", g.typesImportPath))
+	fmt.Fprintf(&source, "\t%q\n", g.typesImportPath)
 	source.WriteString(")\n\n")
 
 	// Generate constants for all schemas
@@ -231,9 +231,9 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 	// Add go:embed directives and variables
 	source.WriteString("var (\n")
 	for _, s := range schemas {
-		source.WriteString(fmt.Sprintf("\t// %sSchemaYAML contains the OpenAPI v3 schema for %s.\n", s.typeName, s.typeName))
-		source.WriteString(fmt.Sprintf("\t//go:embed .schemas/%s_schema.yaml\n", strings.ToLower(s.typeName)))
-		source.WriteString(fmt.Sprintf("\t%sSchemaYAML string\n\n", s.typeName))
+		fmt.Fprintf(&source, "\t// %sSchemaYAML contains the OpenAPI v3 schema for %s.\n", s.typeName, s.typeName)
+		fmt.Fprintf(&source, "\t//go:embed .schemas/%s_schema.yaml\n", strings.ToLower(s.typeName))
+		fmt.Fprintf(&source, "\t%sSchemaYAML string\n\n", s.typeName)
 	}
 	source.WriteString(")\n\n")
 

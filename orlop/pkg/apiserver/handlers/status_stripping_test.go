@@ -63,7 +63,7 @@ func (m *object) DeepCopyObject() runtime.Object {
 	out := &object{}
 	*out = *m
 	out.TypeMeta = m.TypeMeta
-	m.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	m.DeepCopyInto(&out.ObjectMeta)
 	out.Spec = m.Spec
 	// Deep copy status
 	if m.Status.Conditions != nil {
