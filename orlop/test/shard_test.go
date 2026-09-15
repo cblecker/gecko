@@ -203,11 +203,14 @@ func TestShardSelectorDeterministic(t *testing.T) {
 	}
 
 	objJSON, _ := json.Marshal(obj)
-	createResp, _ := insecureClient.Post(
+	createResp, err := insecureClient.Post(
 		baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects",
 		"application/json",
 		bytes.NewBuffer(objJSON),
 	)
+	if err != nil {
+		t.Fatalf("Create request failed: %v", err)
+	}
 	defer createResp.Body.Close()
 
 	if createResp.StatusCode != http.StatusCreated {
@@ -260,7 +263,10 @@ func TestShardSelectorDeterministic(t *testing.T) {
 		url := fmt.Sprintf("%s/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects?shardIndex=%d&shardCount=%d",
 			baseURL, namespace, foundInShard, count)
 
-		resp, _ := insecureClient.Get(url)
+		resp, err := insecureClient.Get(url)
+		if err != nil {
+			t.Fatalf("GET request failed: %v", err)
+		}
 		defer resp.Body.Close()
 
 		var list map[string]interface{}

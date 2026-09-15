@@ -156,12 +156,6 @@ linters:
       - linters:
           - govet
         text: 'inline: Constant reflect\.Ptr'
-      # httpresponse: Body.Close() in deferred calls before the error check is
-      # idiomatic Go (err is checked immediately above the defer).
-      - linters:
-          - govet
-        text: 'httpresponse: using .* before checking for errors'
-        path: '_test\.go$'
 
       # ── misspell ──────────────────────────────────────────────────────────
       # British/Canadian spelling in existing Spanner comments.
