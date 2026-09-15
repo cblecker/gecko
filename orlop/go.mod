@@ -3,7 +3,7 @@ module github.com/openshift-online/gecko/orlop
 go 1.26.4
 
 require (
-	cloud.google.com/go/spanner v1.95.0
+	cloud.google.com/go/spanner v1.95.1
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/cors v1.2.2
