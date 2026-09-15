@@ -873,7 +873,7 @@ func TestMemoryStore_FieldFilters(t *testing.T) {
 		if event.Type != storage.EventAdded {
 			t.Fatalf("expected ADDED event, got %s", event.Type)
 		}
-		eventObj := event.Object.(client.Object)
+		eventObj := event.Object
 		if eventObj.GetName() != "np1" {
 			t.Fatalf("expected event for np1, got %s", eventObj.GetName())
 		}

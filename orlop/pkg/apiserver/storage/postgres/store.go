@@ -607,10 +607,7 @@ func (s *PostgresStore) Watch(ctx context.Context, opts storage.ListOptions, res
 				}
 
 				// Apply filters
-				clientObj, ok := event.Object.(client.Object)
-				if !ok {
-					continue
-				}
+				clientObj := event.Object
 
 				// Filter by namespace
 				if opts.Namespace != "" && clientObj.GetNamespace() != opts.Namespace {

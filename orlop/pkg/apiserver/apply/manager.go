@@ -307,13 +307,13 @@ func structuralToOpenAPIV3Nested(structural *apiextschema.Structural) *spec.Sche
 
 	// Add x-kubernetes extensions
 	if structural.XPreserveUnknownFields {
-		schema.VendorExtensible.AddExtension("x-kubernetes-preserve-unknown-fields", true)
+		schema.AddExtension("x-kubernetes-preserve-unknown-fields", true)
 	}
 	if structural.XEmbeddedResource {
-		schema.VendorExtensible.AddExtension("x-kubernetes-embedded-resource", true)
+		schema.AddExtension("x-kubernetes-embedded-resource", true)
 	}
 	if structural.XIntOrString {
-		schema.VendorExtensible.AddExtension("x-kubernetes-int-or-string", true)
+		schema.AddExtension("x-kubernetes-int-or-string", true)
 	}
 
 	return schema

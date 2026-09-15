@@ -239,30 +239,30 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 
 	// Generate individual ResourceInfo variables
 	for _, s := range schemas {
-		source.WriteString(fmt.Sprintf("// %sResourceInfo describes the %s resource type.\n", s.typeName, s.typeName))
-		source.WriteString(fmt.Sprintf("var %sResourceInfo = types.ResourceInfo{\n", s.typeName))
-		source.WriteString(fmt.Sprintf("\tGVK:        GroupVersion.WithKind(%q),\n", s.typeName))
-		source.WriteString(fmt.Sprintf("\tPlural:     %q,\n", s.plural))
-		source.WriteString(fmt.Sprintf("\tSingular:   %q,\n", s.singular))
-		source.WriteString(fmt.Sprintf("\tNamespaced: %t,\n", s.namespaced))
-		source.WriteString(fmt.Sprintf("\tSchemaYAML: %sSchemaYAML,\n", s.typeName))
+		fmt.Fprintf(&source, "// %sResourceInfo describes the %s resource type.\n", s.typeName, s.typeName)
+		fmt.Fprintf(&source, "var %sResourceInfo = types.ResourceInfo{\n", s.typeName)
+		fmt.Fprintf(&source, "\tGVK:        GroupVersion.WithKind(%q),\n", s.typeName)
+		fmt.Fprintf(&source, "\tPlural:     %q,\n", s.plural)
+		fmt.Fprintf(&source, "\tSingular:   %q,\n", s.singular)
+		fmt.Fprintf(&source, "\tNamespaced: %t,\n", s.namespaced)
+		fmt.Fprintf(&source, "\tSchemaYAML: %sSchemaYAML,\n", s.typeName)
 
 		// Add printer columns if present
 		if len(s.printerColumns) > 0 {
 			source.WriteString("\tPrinterColumns: []types.PrinterColumn{\n")
 			for _, col := range s.printerColumns {
 				source.WriteString("\t\t{\n")
-				source.WriteString(fmt.Sprintf("\t\t\tName:        %q,\n", col.name))
-				source.WriteString(fmt.Sprintf("\t\t\tType:        %q,\n", col.columnType))
+				fmt.Fprintf(&source, "\t\t\tName:        %q,\n", col.name)
+				fmt.Fprintf(&source, "\t\t\tType:        %q,\n", col.columnType)
 				if col.format != "" {
-					source.WriteString(fmt.Sprintf("\t\t\tFormat:      %q,\n", col.format))
+					fmt.Fprintf(&source, "\t\t\tFormat:      %q,\n", col.format)
 				}
-				source.WriteString(fmt.Sprintf("\t\t\tJSONPath:    %q,\n", col.jsonPath))
+				fmt.Fprintf(&source, "\t\t\tJSONPath:    %q,\n", col.jsonPath)
 				if col.description != "" {
-					source.WriteString(fmt.Sprintf("\t\t\tDescription: %q,\n", col.description))
+					fmt.Fprintf(&source, "\t\t\tDescription: %q,\n", col.description)
 				}
 				if col.priority != 0 {
-					source.WriteString(fmt.Sprintf("\t\t\tPriority:    %d,\n", col.priority))
+					fmt.Fprintf(&source, "\t\t\tPriority:    %d,\n", col.priority)
 				}
 				source.WriteString("\t\t},\n")
 			}
@@ -279,7 +279,7 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 	source.WriteString("\treturn []types.ResourceInfo{\n")
 
 	for _, s := range schemas {
-		source.WriteString(fmt.Sprintf("\t\t%sResourceInfo,\n", s.typeName))
+		fmt.Fprintf(&source, "\t\t%sResourceInfo,\n", s.typeName)
 	}
 
 	source.WriteString("\t}\n")

@@ -34,7 +34,7 @@ func buildOpenAPIDefinitions(scheme *runtime.Scheme, resources []types.ResourceI
 				"version": res.GVK.Version,
 				"kind":    res.GVK.Kind,
 			}
-			schema.VendorExtensible.AddExtension("x-kubernetes-group-version-kind", []interface{}{gvkExtension})
+			schema.AddExtension("x-kubernetes-group-version-kind", []interface{}{gvkExtension})
 
 			obj, err := scheme.New(res.GVK)
 			if err != nil {
@@ -188,25 +188,25 @@ func jsonSchemaPropsToOpenAPI(props *apiextv1.JSONSchemaProps) *spec.Schema {
 
 	// x-kubernetes-* extensions
 	if props.XPreserveUnknownFields != nil && *props.XPreserveUnknownFields {
-		schema.VendorExtensible.AddExtension("x-kubernetes-preserve-unknown-fields", true)
+		schema.AddExtension("x-kubernetes-preserve-unknown-fields", true)
 	}
 	if len(props.XListMapKeys) > 0 {
-		schema.VendorExtensible.AddExtension("x-kubernetes-list-map-keys", props.XListMapKeys)
+		schema.AddExtension("x-kubernetes-list-map-keys", props.XListMapKeys)
 	}
 	if props.XListType != nil {
-		schema.VendorExtensible.AddExtension("x-kubernetes-list-type", *props.XListType)
+		schema.AddExtension("x-kubernetes-list-type", *props.XListType)
 	}
 	if props.XMapType != nil {
-		schema.VendorExtensible.AddExtension("x-kubernetes-map-type", *props.XMapType)
+		schema.AddExtension("x-kubernetes-map-type", *props.XMapType)
 	}
 	if props.XIntOrString {
-		schema.VendorExtensible.AddExtension("x-kubernetes-int-or-string", true)
+		schema.AddExtension("x-kubernetes-int-or-string", true)
 	}
 	if len(props.XValidations) > 0 {
-		schema.VendorExtensible.AddExtension("x-kubernetes-validations", props.XValidations)
+		schema.AddExtension("x-kubernetes-validations", props.XValidations)
 	}
 	if props.XEmbeddedResource {
-		schema.VendorExtensible.AddExtension("x-kubernetes-embedded-resource", true)
+		schema.AddExtension("x-kubernetes-embedded-resource", true)
 	}
 
 	return schema
