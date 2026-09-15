@@ -13,7 +13,7 @@ import (
 )
 
 // handleWatch implements the Kubernetes watch protocol
-func (h *ResourceHandler) handleWatch(w http.ResponseWriter, r *http.Request, opts storage.ListOptions, shardSelector *storage.ShardSelector) {
+func (h *ResourceHandler) handleWatch(w http.ResponseWriter, r *http.Request, opts storage.ListOptions) {
 	config := parseWatchConfig(r)
 
 	h.logger.V(1).Info("Watch parameters",

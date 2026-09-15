@@ -182,10 +182,7 @@ func New(opts Options) (*Server, error) {
 		}
 
 		converter := conversion.NewConverter(opts.Public.Scheme, opts.Private.Scheme, opts.Private.Prefix)
-		publicRouter, err := setupConvertingRouter(publicRegistry, privateRegistry, converter, opts.Private.Scheme, opts.CORSOrigins, opts.Public.Middleware, publicHealthCheck)
-		if err != nil {
-			return nil, fmt.Errorf("failed to setup public router: %w", err)
-		}
+		publicRouter := setupConvertingRouter(publicRegistry, privateRegistry, converter, opts.Private.Scheme, opts.CORSOrigins, opts.Public.Middleware, publicHealthCheck)
 
 		publicServer := &http.Server{
 			Addr:              fmt.Sprintf("%s:%d", bindAddress, opts.Public.Port),

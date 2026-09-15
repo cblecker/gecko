@@ -64,7 +64,7 @@ func (g *Generator) generateConversions() error {
 
 		fmt.Printf("  Generating conversions for %s (%d types)...\n", publicImportPath, len(typeNames))
 
-		return g.writeConversionFile(path, pkgName, publicImportPath, privateImportPath, typeNames)
+		return g.writeConversionFile(path, pkgName, privateImportPath, typeNames)
 	})
 }
 
@@ -214,7 +214,7 @@ func Convert_{{ . }}_PublicToPrivate(in *{{ . }}, out *{{ $.PrivateAlias }}.{{ .
 
 // writeConversionFile generates the zz_generated.conversion.go file for a
 // single public package.
-func (g *Generator) writeConversionFile(pkgDir, pkgName, publicImportPath, privateImportPath string, typeNames []string) error {
+func (g *Generator) writeConversionFile(pkgDir, pkgName, privateImportPath string, typeNames []string) error {
 	// Read boilerplate
 	projectRoot := filepath.Dir(filepath.Dir(g.outputDir))
 	boilerplate, err := os.ReadFile(filepath.Join(projectRoot, "hack/boilerplate.go.txt"))
@@ -259,7 +259,8 @@ func (g *Generator) cleanStaleConversionArtifacts() error {
 		if base == "doc.go" {
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return nil
+				// Unreadable doc.go — skip rather than fail the walk.
+				return nil //nolint:nilerr // intentionally ignoring read error
 			}
 			if strings.Contains(string(content), "+k8s:conversion-gen") {
 				fmt.Printf("  Removing stale %s\n", path)

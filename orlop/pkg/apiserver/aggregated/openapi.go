@@ -62,7 +62,7 @@ func buildOpenAPIDefinitions(scheme *runtime.Scheme, resources []types.ResourceI
 
 func goTypeName(obj runtime.Object) string {
 	t := reflect.TypeOf(obj)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return fmt.Sprintf("%s.%s", t.PkgPath(), t.Name())

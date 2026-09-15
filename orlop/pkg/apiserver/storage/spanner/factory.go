@@ -214,7 +214,7 @@ func RunMigrations(ctx context.Context, database string, tablePrefix string, cli
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("context cancelled during DDL migration retry: %w", ctx.Err())
+			return fmt.Errorf("context canceled during DDL migration retry: %w", ctx.Err())
 		case <-time.After(backoff):
 		}
 

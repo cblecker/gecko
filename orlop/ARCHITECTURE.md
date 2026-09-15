@@ -141,12 +141,10 @@ type ObjectSpec struct {
 
 ### Router Setup
 
-**Private Router:**
-```go
-privateRegistry := NewResourceRegistry(privateScheme)
-privateRegistry.Register(privateResources...)
-router := setupRouter(privateRegistry)  // Direct handlers
-```
+**Private API (Aggregated API Server):**
+The private API runs as a Kubernetes aggregated API server via
+`genericapiserver`, which handles routing, authentication, and
+admission control natively.
 
 **Public Router:**
 ```go
