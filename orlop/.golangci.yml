@@ -148,7 +148,12 @@ linters:
       # Complex existing production functions — refactoring is a separate effort.
       - linters:
           - gocyclo
-        path: '^pkg/apiserver/(aggregated/openapi|storage/spanner/store)\.go$'
+        text: 'cyclomatic complexity 37 of func `jsonSchemaPropsToOpenAPI` is high'
+        path: '^pkg/apiserver/aggregated/openapi\.go$'
+      - linters:
+          - gocyclo
+        text: 'cyclomatic complexity 31 of func `\(\*SpannerStore\)\.List` is high'
+        path: '^pkg/apiserver/storage/spanner/store\.go$'
 
       # ── govet ─────────────────────────────────────────────────────────────
       # reflect.Ptr is deprecated; migration to reflect.Pointer is a separate
