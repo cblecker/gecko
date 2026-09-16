@@ -119,7 +119,9 @@ func (m *mockStoreClient) Create(_ context.Context, _ client.Object, _ ...client
 func (m *mockStoreClient) Delete(_ context.Context, obj client.Object, _ ...client.DeleteOption) error {
 	m.deleted = append(m.deleted, obj)
 	if m.deleteErrs != nil {
-		return m.deleteErrs[obj.GetName()]
+		if err, ok := m.deleteErrs[obj.GetName()]; ok {
+			return err
+		}
 	}
 	return m.deleteErr
 }
