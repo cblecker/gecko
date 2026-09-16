@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
+	"github.com/openshift-online/gecko/controllers/util/constants"
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 	"github.com/openshift-online/kube-applier-gcp/pkg/api/kubeapplier"
 	"github.com/openshift-online/kube-applier-gcp/pkg/desireid"
@@ -63,6 +64,7 @@ func cleanupHCCollections(t *testing.T, clients ...*firestore.Client) {
 		for _, client := range clients {
 			clearHCCollection(ctx, t, client, "applydesires")
 			clearHCCollection(ctx, t, client, "readdesires")
+			clearHCCollection(ctx, t, client, "deletedesires")
 		}
 	})
 }
@@ -230,4 +232,75 @@ func TestIntegration_HC_ApplyAndStatusReadback(t *testing.T) {
 	require.Equal(t, "CertificateReady", certificateReady.Reason)
 	require.Equal(t, "api.cluster-integration.example.com", captured.Status.HostedClusterResult.APIEndpoint)
 	require.Equal(t, "4.15.0", captured.Status.HostedClusterResult.Version)
+}
+
+func TestIntegration_HC_DeletionWaitsForNodePools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	opts := hcEmulatorOpts(t)
+	project := fmt.Sprintf("gecko-hc-delete-%d", time.Now().UnixNano())
+	specsClient, err := firestore.NewClientWithDatabase(ctx, project, "specs", opts...)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, specsClient.Close()) })
+	statusClient, err := firestore.NewClientWithDatabase(ctx, project, "status", opts...)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, statusClient.Close()) })
+	cleanupHCCollections(t, specsClient, statusClient)
+
+	transportClient := fstransport.New(testLogger(t), opts...)
+	defer transportClient.Close()
+
+	cluster := buildReadyCluster("cluster-integration", "4.15.0")
+	cluster.Status.Conditions = append(cluster.Status.Conditions, metav1.Condition{
+		Type: "ResourcesApplied", Status: metav1.ConditionTrue, Reason: "Applied",
+	})
+	now := metav1.Now()
+	cluster.SetDeletionTimestamp(&now)
+	cluster.Status.PlacementResult.ManagementClusterName = project
+	groupKey := mustClusterGroupKey(cluster.Namespace, cluster.Name)
+
+	_, err = transportClient.Apply(ctx, project, groupKey, [][]byte{[]byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"test"}}`)})
+	require.NoError(t, err)
+
+	r, storeClient := buildReconciler(t, cluster, nil, transportClient, nil, func(m *mockStoreClient) {
+		m.nodePools = []privatev1.NodePool{{
+			ObjectMeta: metav1.ObjectMeta{Name: "workers", Namespace: cluster.Namespace},
+			Spec:       privatev1.NodePoolSpec{ClusterID: cluster.Name},
+		}}
+	})
+
+	result, err := r.Reconcile(ctx, clusterReq(cluster.Name))
+	require.NoError(t, err)
+	require.Equal(t, 15*time.Second, result.RequeueAfter)
+	require.Len(t, storeClient.deleted, 1)
+	require.Equal(t, "workers", storeClient.deleted[0].GetName())
+	require.False(t, storeClient.updateCalled, "Cluster finalizer must remain while the NodePool exists")
+
+	deleteSnapshots, err := specsClient.Collection("deletedesires").
+		Where("spec.groupKey", "==", groupKey).
+		Documents(ctx).GetAll()
+	require.NoError(t, err)
+	require.Len(t, deleteSnapshots, 1, "Cluster cleanup must start while NodePool deletion is pending")
+
+	var deleteDesire kubeapplier.DeleteDesire
+	require.NoError(t, deleteSnapshots[0].DataTo(&deleteDesire))
+	deleteDesire.Status = kubeapplier.DeleteDesireStatus{
+		Conditions: []metav1.Condition{{
+			Type:   kubeapplier.ConditionTypeSuccessful,
+			Status: metav1.ConditionTrue,
+			Reason: "NoErrors",
+		}},
+		ObservedDesireUpdateTime: deleteSnapshots[0].UpdateTime,
+	}
+	_, err = statusClient.Collection("deletedesires").Doc(deleteSnapshots[0].Ref.ID).Set(ctx, deleteDesire)
+	require.NoError(t, err)
+
+	storeClient.nodePools = nil
+	result, err = r.Reconcile(ctx, clusterReq(cluster.Name))
+	require.NoError(t, err)
+	require.Zero(t, result.RequeueAfter)
+	require.True(t, storeClient.updateCalled)
+	updated := storeClient.updated.(*privatev1.Cluster)
+	require.NotContains(t, updated.Finalizers, constants.FinalizerCluster)
 }
