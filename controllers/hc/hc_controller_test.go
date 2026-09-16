@@ -1115,16 +1115,17 @@ func TestReconcile_Deletion_NodePoolDeleteError(t *testing.T) {
 
 	tr := mock.New()
 	r, storeClient := buildReconciler(t, cluster, nil, tr, nil, func(m *mockStoreClient) {
-		m.nodePools = []privatev1.NodePool{{
-			ObjectMeta: metav1.ObjectMeta{Name: "nodepool", Namespace: cluster.Namespace},
-			Spec:       privatev1.NodePoolSpec{ClusterID: cluster.Name},
-		}}
-		m.deleteErr = fmt.Errorf("api unavailable")
+		m.nodePools = []privatev1.NodePool{
+			{ObjectMeta: metav1.ObjectMeta{Name: "failing", Namespace: cluster.Namespace}, Spec: privatev1.NodePoolSpec{ClusterID: cluster.Name}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "workers", Namespace: cluster.Namespace}, Spec: privatev1.NodePoolSpec{ClusterID: cluster.Name}},
+		}
+		m.deleteErrs = map[string]error{"failing": fmt.Errorf("api unavailable")}
 	})
 
 	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
 	require.ErrorContains(t, err, "delete nodepool")
-	require.Len(t, storeClient.deleted, 1)
+	require.Len(t, storeClient.deleted, 2, "all NodePools should receive a deletion request")
+	require.Equal(t, "workers", storeClient.deleted[1].GetName())
 	require.Empty(t, tr.DeleteCalls, "Cluster cleanup must not start after a NodePool delete failure")
 	require.False(t, storeClient.updateCalled)
 }

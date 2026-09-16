@@ -3,6 +3,7 @@ package hc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -237,6 +238,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, cluster *privatev1.Clus
 	// Start child deletion before cleaning up Cluster resources. Both cleanup paths
 	// may progress together, but the Cluster finalizer waits for every NodePool.
 	nodePoolsRemain := false
+	var deleteErrors []error
 	for i := range nodePools.Items {
 		nodePool := &nodePools.Items[i]
 		nodePoolsRemain = true
@@ -247,9 +249,13 @@ func (r *Reconciler) handleDeletion(ctx context.Context, cluster *privatev1.Clus
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return reconcile.Result{}, fmt.Errorf("%s: delete nodepool %s: %w", adapterName, nodePool.Name, err)
+			deleteErrors = append(deleteErrors, fmt.Errorf("%s: delete nodepool %s: %w", adapterName, nodePool.Name, err))
+			continue
 		}
 		log.Infof(ctx, "%s: deleting nodepool %s for cluster %s", adapterName, nodePool.Name, cluster.Name)
+	}
+	if err := errors.Join(deleteErrors...); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// Only call transport.Delete if resources were applied to an MC.
