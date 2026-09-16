@@ -107,7 +107,11 @@ func (h *ResourceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ValidateParentExists(r.Context(), h.parentStore, namespace, h.parentIDField, objMap); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		status := http.StatusInternalServerError
+		if isInvalidParentError(err) {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 

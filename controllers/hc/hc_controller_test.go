@@ -72,6 +72,7 @@ type mockStoreClient struct {
 	getErr       error
 	listErr      error
 	deleteErr    error
+	deleteErrs   map[string]error
 	statusWriter *mockStatusWriter
 	listCalled   bool
 	listOptions  client.ListOptions
@@ -117,6 +118,9 @@ func (m *mockStoreClient) Create(_ context.Context, _ client.Object, _ ...client
 }
 func (m *mockStoreClient) Delete(_ context.Context, obj client.Object, _ ...client.DeleteOption) error {
 	m.deleted = append(m.deleted, obj)
+	if m.deleteErrs != nil {
+		return m.deleteErrs[obj.GetName()]
+	}
 	return m.deleteErr
 }
 func (m *mockStoreClient) Update(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
@@ -1122,6 +1126,38 @@ func TestReconcile_Deletion_NodePoolDeleteError(t *testing.T) {
 	require.ErrorContains(t, err, "delete nodepool")
 	require.Len(t, storeClient.deleted, 1)
 	require.Empty(t, tr.DeleteCalls, "Cluster cleanup must not start after a NodePool delete failure")
+	require.False(t, storeClient.updateCalled)
+}
+
+func TestReconcile_Deletion_NodePoolAlreadyDeleted(t *testing.T) {
+	cluster := buildReadyCluster("cluster-abc", "4.15.0")
+	cluster.Status.Conditions = append(cluster.Status.Conditions, metav1.Condition{
+		Type: "ResourcesApplied", Status: metav1.ConditionTrue, Reason: "Applied",
+	})
+	now := metav1.Now()
+	cluster.SetDeletionTimestamp(&now)
+
+	tr := mock.New()
+	groupKey := mustClusterGroupKey(cluster.Namespace, cluster.Name)
+	tr.DeleteStatusOverrides["mc-cluster-1/"+groupKey] = &transport.DeleteStatus{
+		AllSuccessful:     false,
+		ApplyDesiresCount: 1,
+	}
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil, func(m *mockStoreClient) {
+		m.nodePools = []privatev1.NodePool{{
+			ObjectMeta: metav1.ObjectMeta{Name: "workers", Namespace: cluster.Namespace},
+			Spec:       privatev1.NodePoolSpec{ClusterID: cluster.Name},
+		}}
+		m.deleteErrs = map[string]error{
+			"workers": apierrors.NewNotFound(schema.GroupResource{Resource: "nodepools"}, "workers"),
+		}
+	})
+
+	result, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+	require.NoError(t, err)
+	require.Equal(t, 15*time.Second, result.RequeueAfter)
+	require.Len(t, storeClient.deleted, 1)
+	require.Len(t, tr.DeleteCalls, 1, "Cluster cleanup should continue after a NodePool is already gone")
 	require.False(t, storeClient.updateCalled)
 }
 

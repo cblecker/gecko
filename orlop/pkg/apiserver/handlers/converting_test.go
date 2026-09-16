@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/schema"
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage/memory"
 
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -95,6 +97,15 @@ func setupConvertingHandlerTest(t *testing.T) (*ConvertingResourceHandler, *memo
 	)
 
 	return handler, store
+}
+
+type failingParentStore struct {
+	storage.ResourceStore
+	err error
+}
+
+func (s failingParentStore) Get(context.Context, string, string) (client.Object, error) {
+	return nil, s.err
 }
 
 // newPermissiveProcessor creates a schema.Processor with a permissive schema
@@ -446,6 +457,46 @@ func TestConvertingResourceHandlerCreateRejectsMissingOrDeletingParent(t *testin
 	}
 	if rr := create(t, "deleting-parent", "deleting"); rr.Code != http.StatusBadRequest {
 		t.Fatalf("deleting parent status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestConvertingResourceHandlerCreateReturnsInternalErrorForParentStoreFailure(t *testing.T) {
+	handler, _ := setupConvertingHandlerTest(t)
+	handler.SetParentStore(failingParentStore{err: fmt.Errorf("storage unavailable")}, "spec.field")
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader([]byte(`{"metadata":{"name":"nodepool"},"spec":{"field":"cluster"}}`)))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(constants.URLParamNamespace, "default")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	handler.Create(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("parent storage failure status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestResourceHandlerCreateReturnsInternalErrorForParentStoreFailure(t *testing.T) {
+	scheme := newTestConvertingScheme()
+	handler := NewResourceHandler(
+		memory.NewMemoryStore("testobjects", scheme, testConvertingGVK),
+		newPermissiveProcessor(t),
+		testConvertingGVK,
+		"testobjects",
+		scheme,
+		logr.Discard(),
+	)
+	handler.SetParentStore(failingParentStore{err: fmt.Errorf("storage unavailable")}, "spec.field")
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader([]byte(`{"metadata":{"name":"nodepool"},"spec":{"field":"cluster"}}`)))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(constants.URLParamNamespace, "default")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	handler.Create(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("parent storage failure status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 }
 

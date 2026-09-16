@@ -244,6 +244,9 @@ func (r *Reconciler) handleDeletion(ctx context.Context, cluster *privatev1.Clus
 			continue
 		}
 		if err := r.client.Delete(ctx, nodePool); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
 			return reconcile.Result{}, fmt.Errorf("%s: delete nodepool %s: %w", adapterName, nodePool.Name, err)
 		}
 		log.Infof(ctx, "%s: deleting nodepool %s for cluster %s", adapterName, nodePool.Name, cluster.Name)

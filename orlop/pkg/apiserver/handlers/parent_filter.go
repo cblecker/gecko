@@ -21,6 +21,19 @@ type ParentFilter struct {
 
 type parentFilterKey struct{}
 
+type invalidParentError struct {
+	message string
+}
+
+func (e *invalidParentError) Error() string {
+	return e.message
+}
+
+func isInvalidParentError(err error) bool {
+	_, ok := err.(*invalidParentError)
+	return ok
+}
+
 // WithParentFilter returns a new context carrying the given ParentFilter.
 func WithParentFilter(ctx context.Context, pf ParentFilter) context.Context {
 	return context.WithValue(ctx, parentFilterKey{}, pf)
@@ -68,12 +81,12 @@ func ValidateParentExists(ctx context.Context, parentStore storage.ResourceStore
 	parent, err := parentStore.Get(ctx, namespace, parentID)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return fmt.Errorf("referenced parent %q not found", parentID)
+			return &invalidParentError{message: fmt.Sprintf("referenced parent %q not found", parentID)}
 		}
 		return fmt.Errorf("get referenced parent %q: %w", parentID, err)
 	}
 	if parent.GetDeletionTimestamp() != nil {
-		return fmt.Errorf("referenced parent %q is being deleted", parentID)
+		return &invalidParentError{message: fmt.Sprintf("referenced parent %q is being deleted", parentID)}
 	}
 	return nil
 }
