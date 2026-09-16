@@ -7,6 +7,7 @@ import (
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -52,6 +53,27 @@ func validateParentOnCreate(ctx context.Context, objMap map[string]interface{}) 
 	}
 	if fieldValueFromMap(objMap, pf.IDField) != pf.ID {
 		return fmt.Errorf("field %s must be %q when creating via nested route", pf.IDField, pf.ID)
+	}
+	return nil
+}
+
+// ValidateParentExists verifies that the parent referenced by a child exists
+// and is not being deleted.
+func ValidateParentExists(ctx context.Context, parentStore storage.ResourceStore, namespace, idField string, objMap map[string]interface{}) error {
+	if parentStore == nil {
+		return nil
+	}
+
+	parentID := fieldValueFromMap(objMap, idField)
+	parent, err := parentStore.Get(ctx, namespace, parentID)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("referenced parent %q not found", parentID)
+		}
+		return fmt.Errorf("get referenced parent %q: %w", parentID, err)
+	}
+	if parent.GetDeletionTimestamp() != nil {
+		return fmt.Errorf("referenced parent %q is being deleted", parentID)
 	}
 	return nil
 }

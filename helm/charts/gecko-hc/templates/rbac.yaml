@@ -12,6 +12,9 @@ rules:
   - apiGroups: ["gcp.managed.openshift.io"]
     resources: ["clusters/status"]
     verbs: ["get", "update", "patch"]
+  - apiGroups: ["gcp.managed.openshift.io"]
+    resources: ["nodepools"]
+    verbs: ["get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

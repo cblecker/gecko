@@ -44,6 +44,13 @@ func createConvertingHandlerWithSharedStore(publicRegistry *ResourceRegistry, pr
 		publicRes.PrinterColumns, // Printer columns for Table format
 		publicRegistry.logger.WithValues("resource", publicRes.Plural),
 	)
+	if publicRes.ParentResource != nil {
+		parentStore, err := privateRegistry.parentStore(publicRes)
+		if err != nil {
+			return nil, err
+		}
+		handler.SetParentStore(parentStore, publicRes.ParentResource.IDField)
+	}
 
 	return handler, nil
 }

@@ -6,8 +6,9 @@ import (
 
 // ParentResourceInfo describes a parent resource for nested routing.
 type ParentResourceInfo struct {
-	Plural  string
-	IDField string
+	Plural    string
+	GroupKind runtimeschema.GroupKind
+	IDField   string
 }
 
 // PrinterColumn defines a custom column for kubectl output.

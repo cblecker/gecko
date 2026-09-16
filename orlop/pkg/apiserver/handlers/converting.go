@@ -43,7 +43,15 @@ type ConvertingResourceHandler struct {
 	publicScheme   *runtime.Scheme // Scheme for public API types
 	privateScheme  *runtime.Scheme // Scheme for private API types
 	printerColumns []types.PrinterColumn
+	parentStore    storage.ResourceStore
+	parentIDField  string
 	logger         logr.Logger
+}
+
+// SetParentStore configures creation-time validation of the parent named by idField.
+func (h *ConvertingResourceHandler) SetParentStore(store storage.ResourceStore, idField string) {
+	h.parentStore = store
+	h.parentIDField = idField
 }
 
 // stripStatus removes the status field from a map, case-insensitively.
@@ -125,6 +133,11 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 	}
 	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
+		return
+	}
+
+	if err := ValidateParentExists(r.Context(), h.parentStore, namespace, h.parentIDField, objMap); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

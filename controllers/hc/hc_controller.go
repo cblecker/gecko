@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	adapterName = "hc-controller"
+	adapterName            = "hc-controller"
+	NodePoolClusterIDField = "spec.clusterID"
 
 	requeuePending = 15 * time.Second
 	requeueStable  = 5 * time.Minute
@@ -225,6 +226,29 @@ func (r *Reconciler) handleDeletion(ctx context.Context, cluster *privatev1.Clus
 		return reconcile.Result{}, nil
 	}
 
+	var nodePools privatev1.NodePoolList
+	if err := r.client.List(ctx, &nodePools,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingFields{NodePoolClusterIDField: cluster.Name},
+	); err != nil {
+		return reconcile.Result{}, fmt.Errorf("%s: list nodepools: %w", adapterName, err)
+	}
+
+	// Start child deletion before cleaning up Cluster resources. Both cleanup paths
+	// may progress together, but the Cluster finalizer waits for every NodePool.
+	nodePoolsRemain := false
+	for i := range nodePools.Items {
+		nodePool := &nodePools.Items[i]
+		nodePoolsRemain = true
+		if !nodePool.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if err := r.client.Delete(ctx, nodePool); err != nil {
+			return reconcile.Result{}, fmt.Errorf("%s: delete nodepool %s: %w", adapterName, nodePool.Name, err)
+		}
+		log.Infof(ctx, "%s: deleting nodepool %s for cluster %s", adapterName, nodePool.Name, cluster.Name)
+	}
+
 	// Only call transport.Delete if resources were applied to an MC.
 	if meta.FindStatusCondition(cluster.Status.Conditions, "ResourcesApplied") != nil &&
 		cluster.Status.PlacementResult != nil && cluster.Status.PlacementResult.ManagementClusterName != "" {
@@ -268,6 +292,11 @@ func (r *Reconciler) handleDeletion(ctx context.Context, cluster *privatev1.Clus
 		if err := r.transport.CleanupDeleteDesires(ctx, mcName, groupKey); err != nil {
 			return reconcile.Result{}, fmt.Errorf("%s: cleanup delete desires: %w", adapterName, err)
 		}
+	}
+
+	if nodePoolsRemain {
+		log.Infof(ctx, "%s: waiting for nodepools to be deleted for cluster %s, requeueing", adapterName, cluster.Name)
+		return reconcile.Result{RequeueAfter: requeuePending}, nil
 	}
 
 	controllerutil.RemoveFinalizer(cluster, constants.FinalizerCluster)

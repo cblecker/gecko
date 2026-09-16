@@ -14,8 +14,9 @@ func getPrivateResources() []types.ResourceInfo {
 	for i := range resources {
 		if resources[i].GVK.Kind == "NodePool" {
 			resources[i].ParentResource = &types.ParentResourceInfo{
-				Plural:  "clusters",
-				IDField: "spec.clusterID",
+				Plural:    "clusters",
+				GroupKind: privatev1.GroupVersion.WithKind("Cluster").GroupKind(),
+				IDField:   "spec.clusterID",
 			}
 		}
 	}
@@ -28,8 +29,9 @@ func getPublicResources() []types.ResourceInfo {
 	for i := range resources {
 		if resources[i].GVK.Kind == "NodePool" {
 			resources[i].ParentResource = &types.ParentResourceInfo{
-				Plural:  "clusters",
-				IDField: "spec.clusterID",
+				Plural:    "clusters",
+				GroupKind: privatev1.GroupVersion.WithKind("Cluster").GroupKind(),
+				IDField:   "spec.clusterID",
 			}
 		}
 	}

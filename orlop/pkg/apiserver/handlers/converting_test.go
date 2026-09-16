@@ -418,6 +418,37 @@ func TestCreate_SetsCreatedByAnnotation_NoHeader(t *testing.T) {
 	}
 }
 
+func TestConvertingResourceHandlerCreateRejectsMissingOrDeletingParent(t *testing.T) {
+	handler, store := setupConvertingHandlerTest(t)
+	handler.SetParentStore(store, "spec.field")
+
+	create := func(t *testing.T, name, parentID string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := []byte(`{"metadata":{"name":"` + name + `"},"spec":{"field":"` + parentID + `"}}`)
+		req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader(body))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add(constants.URLParamNamespace, "default")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.Create(rr, req)
+		return rr
+	}
+
+	if rr := create(t, "missing-parent", "missing"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing parent status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+
+	deletingParent := &mockObject{ObjectMeta: metav1.ObjectMeta{Name: "deleting", Namespace: "default"}}
+	now := metav1.Now()
+	deletingParent.SetDeletionTimestamp(&now)
+	if err := store.Create(context.Background(), deletingParent); err != nil {
+		t.Fatalf("create deleting parent: %v", err)
+	}
+	if rr := create(t, "deleting-parent", "deleting"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("deleting parent status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
 func TestAcceptHeaderTableDetection(t *testing.T) {
 	tests := []struct {
 		name         string
