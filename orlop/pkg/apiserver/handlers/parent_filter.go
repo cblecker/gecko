@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
@@ -30,8 +31,8 @@ func (e *invalidParentError) Error() string {
 }
 
 func isInvalidParentError(err error) bool {
-	_, ok := err.(*invalidParentError)
-	return ok
+	var parentErr *invalidParentError
+	return stderrors.As(err, &parentErr)
 }
 
 // WithParentFilter returns a new context carrying the given ParentFilter.
