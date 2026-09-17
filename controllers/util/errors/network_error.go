@@ -44,7 +44,7 @@ func IsNetworkError(err error) bool {
 	// Check for additional syscall errors not covered by utilnet
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
-		switch errno { //nolint:exhaustive // only matching specific network-related errors
+		switch errno { // only matching specific network-related errors
 		case syscall.ETIMEDOUT: // Connection timed out
 			return true
 		case syscall.ENETUNREACH: // Network is unreachable

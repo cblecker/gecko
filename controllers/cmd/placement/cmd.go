@@ -60,7 +60,7 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create secret manager client: %w", err)
 			}
-			defer smClient.Close() //nolint:errcheck
+			defer smClient.Close()
 
 			selector, err := placement.NewDynamicSelector(smClient, smProject, parseDomains(hcDNSDomains))
 			if err != nil {

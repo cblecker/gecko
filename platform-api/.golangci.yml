@@ -83,18 +83,10 @@ linters:
         - nilness
     misspell:
       locale: US
-    errcheck:
-      exclude-functions:
-        # HTTP response writes — errors are unrecoverable after headers are sent.
-        - (net/http.ResponseWriter).Write
-        - (*encoding/json.Encoder).Encode
   exclusions:
     warn-unused: true
     generated: lax
     presets:
-      - comments
-      - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       # ── errcheck ───────────────────────────────────────────────────────────

@@ -58,7 +58,7 @@ func (c *CincinnatiClient) Resolve(ctx context.Context, version, channel string)
 	if err != nil {
 		return nil, fmt.Errorf("cincinnati: GET %s: %w", url, err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
