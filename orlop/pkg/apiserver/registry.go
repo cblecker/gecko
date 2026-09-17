@@ -159,6 +159,13 @@ func (r *ResourceRegistry) CreateHandler(info ResourceInfo) (*handlers.ResourceH
 	if storageGVK, ok := r.storageGVKs[gk]; ok && storageGVK != info.GVK {
 		handler.SetStorageGVK(storageGVK)
 	}
+	if info.ParentResource != nil {
+		parentStore, err := r.parentStore(info)
+		if err != nil {
+			return nil, err
+		}
+		handler.SetParentStore(parentStore, info.ParentResource.IDField)
+	}
 
 	// Create and set apply manager for server-side apply support
 	structural, err := schema.NewStructural(processor.GetValidationSchema())
@@ -175,6 +182,14 @@ func (r *ResourceRegistry) CreateHandler(info ResourceInfo) (*handlers.ResourceH
 	}
 
 	return handler, nil
+}
+
+func (r *ResourceRegistry) parentStore(info ResourceInfo) (storage.ResourceStore, error) {
+	parentStore := r.GetStore(info.ParentResource.GroupKind)
+	if parentStore == nil {
+		return nil, fmt.Errorf("no store found for parent resource %s", info.ParentResource.GroupKind)
+	}
+	return parentStore, nil
 }
 
 // CreateConvertingHandler creates a ConvertingResourceHandler for the given resource info.
@@ -207,6 +222,13 @@ func (r *ResourceRegistry) CreateConvertingHandler(converter interface{}, privat
 		info.PrinterColumns, // Printer columns for Table format
 		r.logger.WithValues("resource", info.Plural),
 	)
+	if info.ParentResource != nil {
+		parentStore, err := r.parentStore(info)
+		if err != nil {
+			return nil, err
+		}
+		handler.SetParentStore(parentStore, info.ParentResource.IDField)
+	}
 
 	return handler, nil
 }

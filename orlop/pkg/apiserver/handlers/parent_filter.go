@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,6 +21,19 @@ type ParentFilter struct {
 }
 
 type parentFilterKey struct{}
+
+type invalidParentError struct {
+	message string
+}
+
+func (e *invalidParentError) Error() string {
+	return e.message
+}
+
+func isInvalidParentError(err error) bool {
+	var parentErr *invalidParentError
+	return stderrors.As(err, &parentErr)
+}
 
 // WithParentFilter returns a new context carrying the given ParentFilter.
 func WithParentFilter(ctx context.Context, pf ParentFilter) context.Context {
@@ -52,6 +67,27 @@ func validateParentOnCreate(ctx context.Context, objMap map[string]interface{}) 
 	}
 	if fieldValueFromMap(objMap, pf.IDField) != pf.ID {
 		return fmt.Errorf("field %s must be %q when creating via nested route", pf.IDField, pf.ID)
+	}
+	return nil
+}
+
+// ValidateParentExists verifies that the parent referenced by a child exists
+// and is not being deleted.
+func ValidateParentExists(ctx context.Context, parentStore storage.ResourceStore, namespace, idField string, objMap map[string]interface{}) error {
+	if parentStore == nil {
+		return nil
+	}
+
+	parentID := fieldValueFromMap(objMap, idField)
+	parent, err := parentStore.Get(ctx, namespace, parentID)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return &invalidParentError{message: fmt.Sprintf("referenced parent %q not found", parentID)}
+		}
+		return fmt.Errorf("get referenced parent %q: %w", parentID, err)
+	}
+	if parent.GetDeletionTimestamp() != nil {
+		return &invalidParentError{message: fmt.Sprintf("referenced parent %q is being deleted", parentID)}
 	}
 	return nil
 }

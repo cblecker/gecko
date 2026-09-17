@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/schema"
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage/memory"
 
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -95,6 +97,15 @@ func setupConvertingHandlerTest(t *testing.T) (*ConvertingResourceHandler, *memo
 	)
 
 	return handler, store
+}
+
+type failingParentStore struct {
+	storage.ResourceStore
+	err error
+}
+
+func (s failingParentStore) Get(context.Context, string, string) (client.Object, error) {
+	return nil, s.err
 }
 
 // newPermissiveProcessor creates a schema.Processor with a permissive schema
@@ -415,6 +426,77 @@ func TestCreate_SetsCreatedByAnnotation_NoHeader(t *testing.T) {
 	email := extractUserEmail(req)
 	if email != "" {
 		t.Errorf("expected empty email without header, got %q", email)
+	}
+}
+
+func TestConvertingResourceHandlerCreateRejectsMissingOrDeletingParent(t *testing.T) {
+	handler, store := setupConvertingHandlerTest(t)
+	handler.SetParentStore(store, "spec.field")
+
+	create := func(t *testing.T, name, parentID string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := []byte(`{"metadata":{"name":"` + name + `"},"spec":{"field":"` + parentID + `"}}`)
+		req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader(body))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add(constants.URLParamNamespace, "default")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.Create(rr, req)
+		return rr
+	}
+
+	if rr := create(t, "missing-parent", "missing"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing parent status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+
+	deletingParent := &mockObject{ObjectMeta: metav1.ObjectMeta{Name: "deleting", Namespace: "default"}}
+	now := metav1.Now()
+	deletingParent.SetDeletionTimestamp(&now)
+	if err := store.Create(context.Background(), deletingParent); err != nil {
+		t.Fatalf("create deleting parent: %v", err)
+	}
+	if rr := create(t, "deleting-parent", "deleting"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("deleting parent status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestConvertingResourceHandlerCreateReturnsInternalErrorForParentStoreFailure(t *testing.T) {
+	handler, _ := setupConvertingHandlerTest(t)
+	handler.SetParentStore(failingParentStore{err: fmt.Errorf("storage unavailable")}, "spec.field")
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader([]byte(`{"metadata":{"name":"nodepool"},"spec":{"field":"cluster"}}`)))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(constants.URLParamNamespace, "default")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	handler.Create(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("parent storage failure status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestResourceHandlerCreateReturnsInternalErrorForParentStoreFailure(t *testing.T) {
+	scheme := newTestConvertingScheme()
+	handler := NewResourceHandler(
+		memory.NewMemoryStore("testobjects", scheme, testConvertingGVK),
+		newPermissiveProcessor(t),
+		testConvertingGVK,
+		"testobjects",
+		scheme,
+		logr.Discard(),
+	)
+	handler.SetParentStore(failingParentStore{err: fmt.Errorf("storage unavailable")}, "spec.field")
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader([]byte(`{"metadata":{"name":"nodepool"},"spec":{"field":"cluster"}}`)))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(constants.URLParamNamespace, "default")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	handler.Create(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("parent storage failure status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 }
 

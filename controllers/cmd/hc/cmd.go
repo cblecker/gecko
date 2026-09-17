@@ -1,6 +1,7 @@
 package hc
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,12 @@ import (
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // NewCommand returns the hc subcommand.
@@ -44,11 +51,16 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create manager: %w", err)
 			}
+			if err := mgr.GetFieldIndexer().IndexField(ctx, &privatev1.NodePool{}, hc.NodePoolClusterIDField, nodePoolClusterID); err != nil {
+				return fmt.Errorf("index nodepools by cluster ID: %w", err)
+			}
 
 			rec := hc.New(t, log, mgr.GetClient(), customerLabels)
 
 			if err := ctrl.NewControllerManagedBy(mgr).
 				For(&privatev1.Cluster{}).
+				Watches(&privatev1.NodePool{}, handler.EnqueueRequestsFromMapFunc(nodePoolToCluster),
+					builder.WithPredicates(nodePoolDeletePredicate())).
 				WithOptions(rf.ControllerOpts()).
 				Complete(rec); err != nil {
 				return fmt.Errorf("setup controller: %w", err)
@@ -61,4 +73,32 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&customerLabelsFile, "customer-labels-file", "", "Path to JSON file containing customer-facing GCP resource labels (omit to disable)")
 
 	return cmd
+}
+
+func nodePoolClusterID(obj ctrlclient.Object) []string {
+	nodePool, ok := obj.(*privatev1.NodePool)
+	if !ok || nodePool.Spec.ClusterID == "" {
+		return nil
+	}
+	return []string{nodePool.Spec.ClusterID}
+}
+
+func nodePoolToCluster(_ context.Context, obj ctrlclient.Object) []reconcile.Request {
+	nodePool, ok := obj.(*privatev1.NodePool)
+	if !ok || nodePool.Spec.ClusterID == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: ctrlclient.ObjectKey{
+		Namespace: nodePool.Namespace,
+		Name:      nodePool.Spec.ClusterID,
+	}}}
+}
+
+func nodePoolDeletePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		UpdateFunc:  func(event.UpdateEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+	}
 }

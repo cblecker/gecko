@@ -31,14 +31,22 @@ import (
 
 // ResourceHandler handles CRUD operations for a specific resource type.
 type ResourceHandler struct {
-	store        storage.ResourceStore
-	processor    *schema.Processor
-	gvk          runtimeschema.GroupVersionKind
-	storageGVK   runtimeschema.GroupVersionKind // zero value = no version conversion
-	resourceType string
-	scheme       *runtime.Scheme
-	applyManager *apply.Manager // Optional: for server-side apply support
-	logger       logr.Logger
+	store         storage.ResourceStore
+	processor     *schema.Processor
+	gvk           runtimeschema.GroupVersionKind
+	storageGVK    runtimeschema.GroupVersionKind // zero value = no version conversion
+	resourceType  string
+	scheme        *runtime.Scheme
+	applyManager  *apply.Manager // Optional: for server-side apply support
+	parentStore   storage.ResourceStore
+	parentIDField string
+	logger        logr.Logger
+}
+
+// SetParentStore configures creation-time validation of the parent named by idField.
+func (h *ResourceHandler) SetParentStore(store storage.ResourceStore, idField string) {
+	h.parentStore = store
+	h.parentIDField = idField
 }
 
 // NewResourceHandler creates a new resource handler.
@@ -95,6 +103,15 @@ func (h *ResourceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Process object (prune, default, validate)
 	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
+		return
+	}
+
+	if err := ValidateParentExists(r.Context(), h.parentStore, namespace, h.parentIDField, objMap); err != nil {
+		status := http.StatusInternalServerError
+		if isInvalidParentError(err) {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 

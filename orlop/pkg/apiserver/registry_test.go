@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
@@ -127,5 +128,47 @@ func TestRegister_StoresResource(t *testing.T) {
 	store := registry.GetStore(schema.GroupKind{Group: "test", Kind: "Test"})
 	if store == nil {
 		t.Error("Expected store to be created")
+	}
+}
+
+func TestParentStore(t *testing.T) {
+	scheme := runtime.NewScheme()
+	registry := NewResourceRegistry(scheme)
+	parentGVK := schema.GroupVersionKind{Group: "test", Version: "v1", Kind: "Parent"}
+	childInfo := types.ResourceInfo{
+		GVK: schema.GroupVersionKind{Group: "test", Version: "v1", Kind: "Child"},
+		ParentResource: &types.ParentResourceInfo{
+			GroupKind: parentGVK.GroupKind(),
+			IDField:   "spec.parentID",
+		},
+	}
+
+	if err := registry.Register(types.ResourceInfo{GVK: parentGVK}); err != nil {
+		t.Fatalf("register parent: %v", err)
+	}
+	parentStore, err := registry.parentStore(childInfo)
+	if err != nil {
+		t.Fatalf("resolve parent store: %v", err)
+	}
+	if parentStore != registry.GetStore(parentGVK.GroupKind()) {
+		t.Error("resolved store does not match the registered parent store")
+	}
+
+	missingParent := childInfo
+	missingParent.ParentResource = &types.ParentResourceInfo{
+		GroupKind: schema.GroupKind{Group: "test", Kind: "MissingParent"},
+		IDField:   "spec.parentID",
+	}
+	_, err = registry.parentStore(missingParent)
+	if err == nil || !strings.Contains(err.Error(), "no store found for parent resource") {
+		t.Errorf("missing parent store error = %v", err)
+	}
+
+	missingParent.SchemaYAML = "type: object"
+	if err := registry.Register(missingParent); err != nil {
+		t.Fatalf("register child: %v", err)
+	}
+	if _, err := registry.CreateHandler(missingParent); err == nil || !strings.Contains(err.Error(), "no store found for parent resource") {
+		t.Errorf("CreateHandler missing parent store error = %v", err)
 	}
 }

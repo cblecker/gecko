@@ -68,11 +68,18 @@ func (m *mockStatusWriter) Apply(_ context.Context, _ runtime.ApplyConfiguration
 // mockStoreClient is a minimal client.Client backed by a fixed Cluster.
 type mockStoreClient struct {
 	cluster      *privatev1.Cluster
+	nodePools    []privatev1.NodePool
 	getErr       error
+	listErr      error
+	deleteErr    error
+	deleteErrs   map[string]error
 	statusWriter *mockStatusWriter
+	listCalled   bool
+	listOptions  client.ListOptions
 	updateCalled bool
 	updateErr    error
 	updated      client.Object
+	deleted      []client.Object
 }
 
 func (m *mockStoreClient) Get(_ context.Context, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
@@ -92,14 +99,31 @@ func (m *mockStoreClient) Get(_ context.Context, _ client.ObjectKey, obj client.
 
 func (m *mockStoreClient) Status() client.SubResourceWriter { return m.statusWriter }
 
-func (m *mockStoreClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+func (m *mockStoreClient) List(_ context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if m.listErr != nil {
+		return m.listErr
+	}
+	m.listCalled = true
+	m.listOptions = client.ListOptions{}
+	m.listOptions.ApplyOptions(opts)
+	nodePoolList, ok := list.(*privatev1.NodePoolList)
+	if !ok {
+		return fmt.Errorf("unexpected list type %T", list)
+	}
+	nodePoolList.Items = append([]privatev1.NodePool(nil), m.nodePools...)
 	return nil
 }
 func (m *mockStoreClient) Create(_ context.Context, _ client.Object, _ ...client.CreateOption) error {
 	return nil
 }
-func (m *mockStoreClient) Delete(_ context.Context, _ client.Object, _ ...client.DeleteOption) error {
-	return nil
+func (m *mockStoreClient) Delete(_ context.Context, obj client.Object, _ ...client.DeleteOption) error {
+	m.deleted = append(m.deleted, obj)
+	if m.deleteErrs != nil {
+		if err, ok := m.deleteErrs[obj.GetName()]; ok {
+			return err
+		}
+	}
+	return m.deleteErr
 }
 func (m *mockStoreClient) Update(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
 	m.updateCalled = true
@@ -1036,6 +1060,107 @@ func TestReconcile_Deletion_Pending(t *testing.T) {
 	require.Equal(t, 15*time.Second, result.RequeueAfter)
 	require.Empty(t, tr.DeleteCalls)
 	require.Empty(t, tr.CleanupDeleteDesiresCalls)
+	require.False(t, storeClient.updateCalled)
+}
+
+func TestReconcile_Deletion_NodePoolsBlockFinalizerRemoval(t *testing.T) {
+	cluster := buildReadyCluster("cluster-abc", "4.15.0")
+	cluster.Status.Conditions = append(cluster.Status.Conditions, metav1.Condition{
+		Type: "ResourcesApplied", Status: metav1.ConditionTrue, Reason: "Applied",
+	})
+	now := metav1.Now()
+	cluster.SetDeletionTimestamp(&now)
+
+	tr := mock.New()
+	groupKey := mustClusterGroupKey(cluster.Namespace, cluster.Name)
+	tr.DeleteStatusOverrides["mc-cluster-1/"+groupKey] = &transport.DeleteStatus{
+		AllSuccessful: true,
+		TotalCount:    5,
+	}
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil, func(m *mockStoreClient) {
+		m.nodePools = []privatev1.NodePool{
+			{ObjectMeta: metav1.ObjectMeta{Name: "matching", Namespace: cluster.Namespace}, Spec: privatev1.NodePoolSpec{ClusterID: cluster.Name}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "already-deleting", Namespace: cluster.Namespace, DeletionTimestamp: &now}, Spec: privatev1.NodePoolSpec{ClusterID: cluster.Name}},
+		}
+	})
+
+	result, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+	require.NoError(t, err)
+	require.Equal(t, 15*time.Second, result.RequeueAfter)
+	require.True(t, storeClient.listCalled)
+	require.Equal(t, cluster.Namespace, storeClient.listOptions.Namespace)
+	require.Equal(t, hc.NodePoolClusterIDField+"="+cluster.Name, storeClient.listOptions.FieldSelector.String())
+	require.Len(t, storeClient.deleted, 1)
+	require.Equal(t, "matching", storeClient.deleted[0].GetName())
+	require.Len(t, tr.CleanupDeleteDesiresCalls, 1, "cluster cleanup should progress with NodePool deletion")
+	require.False(t, storeClient.updateCalled, "Cluster finalizer must remain while NodePools exist")
+}
+
+func TestReconcile_Deletion_NodePoolListError(t *testing.T) {
+	cluster := buildReadyCluster("cluster-abc", "4.15.0")
+	now := metav1.Now()
+	cluster.SetDeletionTimestamp(&now)
+
+	r, storeClient := buildReconciler(t, cluster, nil, mock.New(), nil, func(m *mockStoreClient) {
+		m.listErr = fmt.Errorf("api unavailable")
+	})
+
+	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+	require.ErrorContains(t, err, "list nodepools")
+	require.False(t, storeClient.updateCalled)
+}
+
+func TestReconcile_Deletion_NodePoolDeleteError(t *testing.T) {
+	cluster := buildReadyCluster("cluster-abc", "4.15.0")
+	now := metav1.Now()
+	cluster.SetDeletionTimestamp(&now)
+
+	tr := mock.New()
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil, func(m *mockStoreClient) {
+		m.nodePools = []privatev1.NodePool{
+			{ObjectMeta: metav1.ObjectMeta{Name: "failing", Namespace: cluster.Namespace}, Spec: privatev1.NodePoolSpec{ClusterID: cluster.Name}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "workers", Namespace: cluster.Namespace}, Spec: privatev1.NodePoolSpec{ClusterID: cluster.Name}},
+		}
+		m.deleteErrs = map[string]error{"failing": fmt.Errorf("api unavailable")}
+	})
+
+	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+	require.ErrorContains(t, err, "delete nodepool")
+	require.Len(t, storeClient.deleted, 2, "all NodePools should receive a deletion request")
+	require.Equal(t, "workers", storeClient.deleted[1].GetName())
+	require.Empty(t, tr.DeleteCalls, "Cluster cleanup must not start after a NodePool delete failure")
+	require.False(t, storeClient.updateCalled)
+}
+
+func TestReconcile_Deletion_NodePoolAlreadyDeleted(t *testing.T) {
+	cluster := buildReadyCluster("cluster-abc", "4.15.0")
+	cluster.Status.Conditions = append(cluster.Status.Conditions, metav1.Condition{
+		Type: "ResourcesApplied", Status: metav1.ConditionTrue, Reason: "Applied",
+	})
+	now := metav1.Now()
+	cluster.SetDeletionTimestamp(&now)
+
+	tr := mock.New()
+	groupKey := mustClusterGroupKey(cluster.Namespace, cluster.Name)
+	tr.DeleteStatusOverrides["mc-cluster-1/"+groupKey] = &transport.DeleteStatus{
+		AllSuccessful:     false,
+		ApplyDesiresCount: 1,
+	}
+	r, storeClient := buildReconciler(t, cluster, nil, tr, nil, func(m *mockStoreClient) {
+		m.nodePools = []privatev1.NodePool{{
+			ObjectMeta: metav1.ObjectMeta{Name: "workers", Namespace: cluster.Namespace},
+			Spec:       privatev1.NodePoolSpec{ClusterID: cluster.Name},
+		}}
+		m.deleteErrs = map[string]error{
+			"workers": apierrors.NewNotFound(schema.GroupResource{Resource: "nodepools"}, "workers"),
+		}
+	})
+
+	result, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+	require.NoError(t, err)
+	require.Equal(t, 15*time.Second, result.RequeueAfter)
+	require.Len(t, storeClient.deleted, 1)
+	require.Len(t, tr.DeleteCalls, 1, "Cluster cleanup should continue after a NodePool is already gone")
 	require.False(t, storeClient.updateCalled)
 }
 
