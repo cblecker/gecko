@@ -30,9 +30,6 @@ linters:
     warn-unused: true
     generated: lax
     presets:
-      - comments
-      - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       # Existing reconcile flows have complexity 32 and 43. Splitting their

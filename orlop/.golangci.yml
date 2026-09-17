@@ -94,9 +94,6 @@ linters:
     warn-unused: true
     generated: lax
     presets:
-      - comments
-      - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       # ── errcheck ───────────────────────────────────────────────────────────
@@ -149,13 +146,6 @@ linters:
           - gocyclo
         text: 'cyclomatic complexity 31 of func `\(\*SpannerStore\)\.List` is high'
         path: '^pkg/apiserver/storage/spanner/store\.go$'
-
-      # ── govet ─────────────────────────────────────────────────────────────
-      # reflect.Ptr is deprecated; migration to reflect.Pointer is a separate
-      # effort and does not affect correctness.
-      - linters:
-          - govet
-        text: 'inline: Constant reflect\.Ptr'
 
       # ── noctx ─────────────────────────────────────────────────────────────
       # Tests spin up short-lived in-memory servers; context-free API calls are

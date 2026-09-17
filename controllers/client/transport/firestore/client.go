@@ -87,7 +87,7 @@ func (c *Client) clients(ctx context.Context, mcName string) (*mcClients, error)
 
 	statusClient, err := firestore.NewClientWithDatabase(ctx, mcName, statusDBName, c.dialOpts...)
 	if err != nil {
-		specsClient.Close() //nolint:errcheck
+		specsClient.Close()
 		return nil, fmt.Errorf("firestore transport: create status client for MC %q: %w", mcName, err)
 	}
 
@@ -97,8 +97,8 @@ func (c *Client) clients(ctx context.Context, mcName string) (*mcClients, error)
 	// Re-check after acquiring write lock — another goroutine may have populated
 	// the cache while we were dialing. Close the duplicate pair if so.
 	if mc, ok := c.cache[mcName]; ok {
-		specsClient.Close()  //nolint:errcheck
-		statusClient.Close() //nolint:errcheck
+		specsClient.Close()
+		statusClient.Close()
 		return mc, nil
 	}
 
@@ -486,8 +486,8 @@ func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, mc := range c.cache {
-		mc.specs.Close()  //nolint:errcheck
-		mc.status.Close() //nolint:errcheck
+		mc.specs.Close()
+		mc.status.Close()
 	}
 	c.cache = make(map[string]*mcClients)
 }
