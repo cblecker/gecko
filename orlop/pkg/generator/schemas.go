@@ -204,7 +204,7 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 	source.WriteString("package " + pkg + "\n\n")
 	source.WriteString("import (\n")
 	source.WriteString("\t_ \"embed\"\n\n")
-	source.WriteString(fmt.Sprintf("\t%q\n", g.typesImportPath))
+	fmt.Fprintf(&source, "\t%q\n", g.typesImportPath)
 	source.WriteString(")\n\n")
 
 	// Generate constants for all schemas
@@ -231,38 +231,38 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 	// Add go:embed directives and variables
 	source.WriteString("var (\n")
 	for _, s := range schemas {
-		source.WriteString(fmt.Sprintf("\t// %sSchemaYAML contains the OpenAPI v3 schema for %s.\n", s.typeName, s.typeName))
-		source.WriteString(fmt.Sprintf("\t//go:embed .schemas/%s_schema.yaml\n", strings.ToLower(s.typeName)))
-		source.WriteString(fmt.Sprintf("\t%sSchemaYAML string\n\n", s.typeName))
+		fmt.Fprintf(&source, "\t// %sSchemaYAML contains the OpenAPI v3 schema for %s.\n", s.typeName, s.typeName)
+		fmt.Fprintf(&source, "\t//go:embed .schemas/%s_schema.yaml\n", strings.ToLower(s.typeName))
+		fmt.Fprintf(&source, "\t%sSchemaYAML string\n\n", s.typeName)
 	}
 	source.WriteString(")\n\n")
 
 	// Generate individual ResourceInfo variables
 	for _, s := range schemas {
-		source.WriteString(fmt.Sprintf("// %sResourceInfo describes the %s resource type.\n", s.typeName, s.typeName))
-		source.WriteString(fmt.Sprintf("var %sResourceInfo = types.ResourceInfo{\n", s.typeName))
-		source.WriteString(fmt.Sprintf("\tGVK:        GroupVersion.WithKind(%q),\n", s.typeName))
-		source.WriteString(fmt.Sprintf("\tPlural:     %q,\n", s.plural))
-		source.WriteString(fmt.Sprintf("\tSingular:   %q,\n", s.singular))
-		source.WriteString(fmt.Sprintf("\tNamespaced: %t,\n", s.namespaced))
-		source.WriteString(fmt.Sprintf("\tSchemaYAML: %sSchemaYAML,\n", s.typeName))
+		fmt.Fprintf(&source, "// %sResourceInfo describes the %s resource type.\n", s.typeName, s.typeName)
+		fmt.Fprintf(&source, "var %sResourceInfo = types.ResourceInfo{\n", s.typeName)
+		fmt.Fprintf(&source, "\tGVK:        GroupVersion.WithKind(%q),\n", s.typeName)
+		fmt.Fprintf(&source, "\tPlural:     %q,\n", s.plural)
+		fmt.Fprintf(&source, "\tSingular:   %q,\n", s.singular)
+		fmt.Fprintf(&source, "\tNamespaced: %t,\n", s.namespaced)
+		fmt.Fprintf(&source, "\tSchemaYAML: %sSchemaYAML,\n", s.typeName)
 
 		// Add printer columns if present
 		if len(s.printerColumns) > 0 {
 			source.WriteString("\tPrinterColumns: []types.PrinterColumn{\n")
 			for _, col := range s.printerColumns {
 				source.WriteString("\t\t{\n")
-				source.WriteString(fmt.Sprintf("\t\t\tName:        %q,\n", col.name))
-				source.WriteString(fmt.Sprintf("\t\t\tType:        %q,\n", col.columnType))
+				fmt.Fprintf(&source, "\t\t\tName:        %q,\n", col.name)
+				fmt.Fprintf(&source, "\t\t\tType:        %q,\n", col.columnType)
 				if col.format != "" {
-					source.WriteString(fmt.Sprintf("\t\t\tFormat:      %q,\n", col.format))
+					fmt.Fprintf(&source, "\t\t\tFormat:      %q,\n", col.format)
 				}
-				source.WriteString(fmt.Sprintf("\t\t\tJSONPath:    %q,\n", col.jsonPath))
+				fmt.Fprintf(&source, "\t\t\tJSONPath:    %q,\n", col.jsonPath)
 				if col.description != "" {
-					source.WriteString(fmt.Sprintf("\t\t\tDescription: %q,\n", col.description))
+					fmt.Fprintf(&source, "\t\t\tDescription: %q,\n", col.description)
 				}
 				if col.priority != 0 {
-					source.WriteString(fmt.Sprintf("\t\t\tPriority:    %d,\n", col.priority))
+					fmt.Fprintf(&source, "\t\t\tPriority:    %d,\n", col.priority)
 				}
 				source.WriteString("\t\t},\n")
 			}
@@ -279,7 +279,7 @@ func (g *Generator) generateSchemaGoFile(outputPath, packageDir string, schemas 
 	source.WriteString("\treturn []types.ResourceInfo{\n")
 
 	for _, s := range schemas {
-		source.WriteString(fmt.Sprintf("\t\t%sResourceInfo,\n", s.typeName))
+		fmt.Fprintf(&source, "\t\t%sResourceInfo,\n", s.typeName)
 	}
 
 	source.WriteString("\t}\n")
@@ -323,65 +323,4 @@ func determinePackageName(dir string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not determine package name from directory %s", dir)
-}
-
-func determineGroupVersion(dir string) (group, version string, err error) {
-	// Look for groupversion_info.go file in current directory
-	groupVersionFile := filepath.Join(dir, "groupversion_info.go")
-	data, err := os.ReadFile(groupVersionFile)
-
-	// If not found in current dir, try looking in subdirectories (e.g., v1/)
-	if err != nil {
-		// Try finding it in a versioned subdirectory
-		entries, readErr := os.ReadDir(dir)
-		if readErr == nil {
-			for _, entry := range entries {
-				if entry.IsDir() && strings.HasPrefix(entry.Name(), "v") {
-					versionedFile := filepath.Join(dir, entry.Name(), "groupversion_info.go")
-					data, err = os.ReadFile(versionedFile)
-					if err == nil {
-						groupVersionFile = versionedFile
-						break
-					}
-				}
-			}
-		}
-
-		// If still not found, return error
-		if err != nil {
-			return "", "", fmt.Errorf("failed to read groupversion_info.go: %w", err)
-		}
-	}
-
-	content := string(data)
-
-	// Look for Group: "..." pattern
-	if idx := strings.Index(content, `Group:`); idx != -1 {
-		afterGroup := content[idx+6:]
-		// Find the quoted string
-		if startQuote := strings.Index(afterGroup, `"`); startQuote != -1 {
-			afterStart := afterGroup[startQuote+1:]
-			if endQuote := strings.Index(afterStart, `"`); endQuote != -1 {
-				group = afterStart[:endQuote]
-			}
-		}
-	}
-
-	// Look for Version: "..." pattern
-	if idx := strings.Index(content, `Version:`); idx != -1 {
-		afterVersion := content[idx+8:]
-		// Find the quoted string
-		if startQuote := strings.Index(afterVersion, `"`); startQuote != -1 {
-			afterStart := afterVersion[startQuote+1:]
-			if endQuote := strings.Index(afterStart, `"`); endQuote != -1 {
-				version = afterStart[:endQuote]
-			}
-		}
-	}
-
-	if group == "" || version == "" {
-		return "", "", fmt.Errorf("could not determine group/version from %s (group=%q, version=%q)", groupVersionFile, group, version)
-	}
-
-	return group, version, nil
 }

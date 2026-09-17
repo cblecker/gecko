@@ -23,7 +23,7 @@ func isNonNil(obj runtime.Object) bool {
 	// runtime.Object implementations are always pointer or interface,
 	// but guard defensively.
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
 		return !v.IsNil()
 	default:
 		// Non-nilable kind (e.g. struct value receiver) — treat as non-nil.

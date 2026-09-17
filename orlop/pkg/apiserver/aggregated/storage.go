@@ -262,11 +262,6 @@ func (s *ResourceStorage) Delete(ctx context.Context, name string, deleteValidat
 			return nil, false, errors.NewBadRequest(fmt.Sprintf("validation failed: %v", err))
 		}
 	}
-	clientObj, ok := existing.(client.Object)
-	if !ok {
-		return nil, false, fmt.Errorf("object does not implement client.Object")
-	}
-
 	if options != nil {
 		if options.GracePeriodSeconds != nil && *options.GracePeriodSeconds > 0 {
 			s.logger.V(1).Info("GracePeriodSeconds not supported, proceeding with immediate deletion",
@@ -285,16 +280,16 @@ func (s *ResourceStorage) Delete(ctx context.Context, name string, deleteValidat
 		}
 	}
 
-	if len(clientObj.GetFinalizers()) > 0 {
-		if clientObj.GetDeletionTimestamp() == nil {
+	if len(existing.GetFinalizers()) > 0 {
+		if existing.GetDeletionTimestamp() == nil {
 			now := metav1.Now()
-			clientObj.SetDeletionTimestamp(&now)
-			clientObj.GetObjectKind().SetGroupVersionKind(s.gvk)
-			if err := s.store.Update(ctx, clientObj); err != nil {
+			existing.SetDeletionTimestamp(&now)
+			existing.GetObjectKind().SetGroupVersionKind(s.gvk)
+			if err := s.store.Update(ctx, existing); err != nil {
 				return nil, false, fmt.Errorf("failed to set deletionTimestamp: %w", err)
 			}
 		}
-		return clientObj, false, nil
+		return existing, false, nil
 	}
 	if err := s.store.Delete(ctx, namespace, name); err != nil {
 		return nil, false, fmt.Errorf("failed to delete %s: %w", s.singular, err)

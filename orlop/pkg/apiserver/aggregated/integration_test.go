@@ -26,7 +26,7 @@ import (
 
 type integrationTestEnv struct {
 	server *AggregatedServer
-	stopCh chan struct{}
+	cancel context.CancelFunc
 	port   int
 	client *http.Client
 }
@@ -78,9 +78,9 @@ func setupIntegrationTestWithConfig(t *testing.T, mutate func(*Config)) *integra
 		t.Fatalf("New failed: %v", err)
 	}
 
-	stopCh := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		if err := server.GenericAPIServer.PrepareRun().Run(stopCh); err != nil {
+		if err := server.GenericAPIServer.PrepareRun().RunWithContext(ctx); err != nil {
 			t.Logf("server exited: %v", err)
 		}
 	}()
@@ -105,13 +105,11 @@ func setupIntegrationTestWithConfig(t *testing.T, mutate func(*Config)) *integra
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	t.Cleanup(func() {
-		close(stopCh)
-	})
+	t.Cleanup(cancel)
 
 	return &integrationTestEnv{
 		server: server,
-		stopCh: stopCh,
+		cancel: cancel,
 		port:   portInt,
 		client: client,
 	}

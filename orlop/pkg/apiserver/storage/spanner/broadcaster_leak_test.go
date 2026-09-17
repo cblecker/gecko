@@ -46,7 +46,7 @@ func TestHandleChildPartitionsRecord_SkipsDuplicateTokens(t *testing.T) {
 		t.Fatal("token-B should be in spawnedChildren after first call")
 	}
 
-	// Goroutines exit immediately (context already cancelled).
+	// Goroutines exit immediately (context already canceled).
 	b.wg.Wait()
 
 	// Second call with same tokens — should NOT spawn new goroutines.

@@ -852,15 +852,8 @@ func (h *ConvertingResourceHandler) Delete(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// Cast to client.Object to access finalizers and deletionTimestamp
-	clientObj, ok := existing.(client.Object)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "object does not implement client.Object")
-		return
-	}
-
-	finalizers := clientObj.GetFinalizers()
-	deletionTimestamp := clientObj.GetDeletionTimestamp()
+	finalizers := existing.GetFinalizers()
+	deletionTimestamp := existing.GetDeletionTimestamp()
 
 	// Kubernetes finalizer deletion flow:
 	// 1. If object has finalizers and is not marked for deletion, set deletionTimestamp (soft delete)

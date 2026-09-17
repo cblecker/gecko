@@ -559,19 +559,15 @@ func (s *MemoryStore) Watch(ctx context.Context, opts storage.ListOptions, resou
 
 				// Filter by shard
 				if opts.ShardSelector != nil {
-					clientObj, ok := event.Object.(client.Object)
-					if ok {
-						matches, err := storage.MatchesShard(clientObj, opts.ShardSelector)
-						if err != nil || !matches {
-							continue
-						}
+					matches, err := storage.MatchesShard(event.Object, opts.ShardSelector)
+					if err != nil || !matches {
+						continue
 					}
 				}
 
 				// Filter by field filters
 				if len(opts.FieldFilters) > 0 {
-					clientObj, ok := event.Object.(client.Object)
-					if !ok || !matchesFieldFilters(clientObj, opts.FieldFilters) {
+					if !matchesFieldFilters(event.Object, opts.FieldFilters) {
 						continue
 					}
 				}

@@ -232,7 +232,7 @@ func (b *spannerBroadcaster) readChangeStream(ctx context.Context, partitionToke
 
 // processChangeRecords drains the iterator and dispatches each record type.
 // It returns sawChildren=true when at least one ChildPartitionsRecord was
-// present, signalling that this partition has been split/merged and the
+// present, signaling that this partition has been split/merged and the
 // caller should exit.
 func (b *spannerBroadcaster) processChangeRecords(ctx context.Context, iter *spanner.RowIterator, lastTs *time.Time) (sawChildren bool, err error) {
 	for {
@@ -517,7 +517,7 @@ func (b *spannerBroadcaster) Subscribe(sinceResourceVersion string) (<-chan stor
 
 // sendHistoricalEvents replays events since the given RV. Returns the last
 // replayed RV (for deduplication against live events) and false if the output
-// channel is full (watch should be cancelled).
+// channel is full (watch should be canceled).
 func (b *spannerBroadcaster) sendHistoricalEvents(outCh chan storage.ResourceEvent, sinceResourceVersion string) (int64, bool) {
 	rv, err := strconv.ParseInt(sinceResourceVersion, 10, 64)
 	if err != nil {

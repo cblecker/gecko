@@ -660,19 +660,6 @@ func (g *Generator) shouldIncludeField(field *ast.Field) (include bool, isPublic
 	return false, false
 }
 
-func (g *Generator) getTypeName(expr ast.Expr) string {
-	switch t := expr.(type) {
-	case *ast.Ident:
-		return t.Name
-	case *ast.StarExpr:
-		return g.getTypeName(t.X)
-	case *ast.ArrayType:
-		return g.getTypeName(t.Elt)
-	default:
-		return ""
-	}
-}
-
 func (g *Generator) generateDeepCopy(rootPath string) error {
 	registry := &markers.Registry{}
 	gen := deepcopy.Generator{

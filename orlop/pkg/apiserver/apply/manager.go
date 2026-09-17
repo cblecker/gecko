@@ -252,18 +252,18 @@ func structuralToOpenAPIV3(structural *apiextschema.Structural, gvk runtimeschem
 
 	// Add x-kubernetes extensions
 	if structural.XPreserveUnknownFields {
-		schema.VendorExtensible.AddExtension("x-kubernetes-preserve-unknown-fields", true)
+		schema.AddExtension("x-kubernetes-preserve-unknown-fields", true)
 	}
 	if structural.XEmbeddedResource {
-		schema.VendorExtensible.AddExtension("x-kubernetes-embedded-resource", true)
+		schema.AddExtension("x-kubernetes-embedded-resource", true)
 	}
 	if structural.XIntOrString {
-		schema.VendorExtensible.AddExtension("x-kubernetes-int-or-string", true)
+		schema.AddExtension("x-kubernetes-int-or-string", true)
 	}
 
 	// CRITICAL: Add x-kubernetes-group-version-kind extension
 	// This is required for the managedfields TypeConverter to index the schema by GVK
-	schema.VendorExtensible.AddExtension("x-kubernetes-group-version-kind", []interface{}{
+	schema.AddExtension("x-kubernetes-group-version-kind", []interface{}{
 		map[string]interface{}{
 			"group":   gvk.Group,
 			"version": gvk.Version,
@@ -307,13 +307,13 @@ func structuralToOpenAPIV3Nested(structural *apiextschema.Structural) *spec.Sche
 
 	// Add x-kubernetes extensions
 	if structural.XPreserveUnknownFields {
-		schema.VendorExtensible.AddExtension("x-kubernetes-preserve-unknown-fields", true)
+		schema.AddExtension("x-kubernetes-preserve-unknown-fields", true)
 	}
 	if structural.XEmbeddedResource {
-		schema.VendorExtensible.AddExtension("x-kubernetes-embedded-resource", true)
+		schema.AddExtension("x-kubernetes-embedded-resource", true)
 	}
 	if structural.XIntOrString {
-		schema.VendorExtensible.AddExtension("x-kubernetes-int-or-string", true)
+		schema.AddExtension("x-kubernetes-int-or-string", true)
 	}
 
 	return schema

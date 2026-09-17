@@ -1,6 +1,7 @@
 package aggregated
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sort"
@@ -208,9 +209,9 @@ func (s *AggregatedServer) PrepareRun() *PreparedAggregatedServer {
 	return &PreparedAggregatedServer{AggregatedServer: s}
 }
 
-// Run runs the prepared server until stopCh is closed.
-func (s *PreparedAggregatedServer) Run(stopCh <-chan struct{}) error {
-	return s.GenericAPIServer.PrepareRun().Run(stopCh)
+// RunWithContext runs the prepared server until ctx is canceled.
+func (s *PreparedAggregatedServer) RunWithContext(ctx context.Context) error {
+	return s.GenericAPIServer.PrepareRun().RunWithContext(ctx)
 }
 
 // createProcessor creates a schema processor from YAML schema.

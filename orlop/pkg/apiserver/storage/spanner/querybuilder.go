@@ -42,9 +42,8 @@ func (qb *queryBuilder) nextParam(value any) string {
 	return "@" + name
 }
 
-func (qb *queryBuilder) appendWhere(condition string) *queryBuilder {
+func (qb *queryBuilder) appendWhere(condition string) {
 	qb.where = append(qb.where, condition)
-	return qb
 }
 
 func (qb *queryBuilder) whereResourceType(rt string) *queryBuilder {

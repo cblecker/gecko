@@ -19,11 +19,6 @@ linters:
     - errcheck
     - unused
     - kubeapilinter
-  # staticcheck (honnef.co/go/tools@v0.7.0) panics on go1.27 IR constructs
-  # (*ast.KeyValueExpr in the poll package). Disable until the upstream library
-  # adds go1.27 support.
-  disable:
-    - staticcheck
   settings:
     custom:
       kubeapilinter:
@@ -162,19 +157,6 @@ linters:
           - govet
         text: 'inline: Constant reflect\.Ptr'
 
-      # ── misspell ──────────────────────────────────────────────────────────
-      # British/Canadian spelling in existing Spanner comments.
-      - linters:
-          - misspell
-        text: '`(signalling|cancelled)` is a misspelling'
-        path: '^pkg/apiserver/storage/spanner/'
-
-      # ── nilerr ────────────────────────────────────────────────────────────
-      # Existing nilerr in conversions.go — fix separately.
-      - linters:
-          - nilerr
-        path: '^pkg/generator/conversions\.go$'
-
       # ── noctx ─────────────────────────────────────────────────────────────
       # Tests spin up short-lived in-memory servers; context-free API calls are
       # acceptable within bounded test lifetimes.
@@ -190,24 +172,6 @@ linters:
       - linters:
           - unparam
         path: '_test\.go$'
-      # Known always-nil error returns in existing router/table API surface.
-      - linters:
-          - unparam
-        text: 'result .* \(error\) is always nil'
-        path: '^pkg/apiserver/(aggregated/table|router)\.go$'
-      # Existing unused parameter in handler — fix in a separate PR.
-      - linters:
-          - unparam
-        text: 'shardSelector is unused'
-        path: '^pkg/apiserver/handlers/watch\.go$'
-      - linters:
-          - unparam
-        text: 'publicImportPath is unused'
-        path: '^pkg/generator/conversions\.go$'
-      - linters:
-          - unparam
-        text: 'appendWhere - result'
-        path: '^pkg/apiserver/storage/spanner/querybuilder\.go$'
 
       # ── unused ────────────────────────────────────────────────────────────
       # localSchemeBuilder is assigned for side-effects in the Kubernetes scheme
@@ -215,14 +179,12 @@ linters:
       - linters:
           - unused
         text: 'var localSchemeBuilder is unused'
-      # Unused helper functions kept for future use.
+      # PostgreSQL withLabels test helper — kept for parity with other storage
+      # backend tests (memory, spanner) that use the same builder pattern.
       - linters:
           - unused
-        text: 'func .* is unused'
-        path: '^(pkg/apiserver/router\.go|pkg/generator/(generator|schemas)\.go)$'
-      - linters:
-          - unused
-        path: '_test\.go$'
+        text: 'func withLabels is unused'
+        path: '^pkg/apiserver/storage/postgres/store_test\.go$'
 
       # ── usestdlibvars ─────────────────────────────────────────────────────
       # Existing test files use string HTTP method literals — migrating to

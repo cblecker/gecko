@@ -304,7 +304,7 @@ func (h *ResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.logger.V(1).Info("Watch request", "kind", h.gvk.Kind, "namespace", namespace, "shard", shardSelector, "uri", r.RequestURI)
 		}
-		h.handleWatch(w, r, opts, shardSelector)
+		h.handleWatch(w, r, opts)
 		return
 	}
 

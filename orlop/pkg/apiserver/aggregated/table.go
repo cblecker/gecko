@@ -41,10 +41,7 @@ func (c *CustomTableConvertor) ConvertToTable(ctx context.Context, obj runtime.O
 	table.ColumnDefinitions = c.buildColumnDefinitions()
 
 	// Extract items
-	items, err := extractItems(obj)
-	if err != nil {
-		return nil, err
-	}
+	items := extractItems(obj)
 
 	// Build rows
 	for _, item := range items {
@@ -148,9 +145,9 @@ func (c *CustomTableConvertor) evaluateJSONPath(obj map[string]interface{}, path
 }
 
 // extractItems returns a slice of runtime.Object from obj (handles both single and list).
-func extractItems(obj runtime.Object) ([]runtime.Object, error) {
+func extractItems(obj runtime.Object) []runtime.Object {
 	if obj == nil {
-		return nil, nil
+		return nil
 	}
 
 	// Check if it's a List
@@ -158,12 +155,10 @@ func extractItems(obj runtime.Object) ([]runtime.Object, error) {
 	if err == nil {
 		// Successfully extracted list (may be empty)
 		result := make([]runtime.Object, len(items))
-		for i, item := range items {
-			result[i] = item
-		}
-		return result, nil
+		copy(result, items)
+		return result
 	}
 
 	// Single object
-	return []runtime.Object{obj}, nil
+	return []runtime.Object{obj}
 }
