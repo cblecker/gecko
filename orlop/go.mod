@@ -13,7 +13,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 	golang.org/x/net v0.59.0
-	google.golang.org/api v0.297.0
+	google.golang.org/api v0.298.0
 	google.golang.org/grpc v1.83.2
 	k8s.io/apiextensions-apiserver v0.37.0
 	k8s.io/apimachinery v0.37.0
