@@ -2,6 +2,7 @@ package spanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -238,7 +239,7 @@ func TestMain(m *testing.M) {
 		iter := sharedClient.Single().Query(ctx, spanner.Statement{SQL: "SELECT 1"})
 		_, warmupErr := iter.Next()
 		iter.Stop()
-		if warmupErr == nil || warmupErr == iterator.Done {
+		if warmupErr == nil || errors.Is(warmupErr, iterator.Done) {
 			break
 		}
 		if attempt == 9 {

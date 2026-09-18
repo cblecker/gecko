@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,8 +38,12 @@ var (
 func TestMain(m *testing.M) {
 	// Create scheme and register test types (both v1 and v2)
 	scheme := runtime.NewScheme()
-	privatev1.AddToScheme(scheme)
-	privatev2.AddToScheme(scheme)
+	if err := privatev1.AddToScheme(scheme); err != nil {
+		panic(fmt.Sprintf("failed to register private v1 types: %v", err))
+	}
+	if err := privatev2.AddToScheme(scheme); err != nil {
+		panic(fmt.Sprintf("failed to register private v2 types: %v", err))
+	}
 
 	// Register conversion functions so the aggregated GenericAPIServer
 	// can convert between v1 and v2 (structurally identical types).
@@ -128,7 +133,7 @@ func TestMain(m *testing.M) {
 
 	// Start server in background
 	go func() {
-		if err := server.Run(); err != nil && err != http.ErrServerClosed {
+		if err := server.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(fmt.Sprintf("Server error: %v", err))
 		}
 	}()
@@ -210,7 +215,7 @@ func TestObjectCRUD(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -233,7 +238,7 @@ func TestObjectCRUD(t *testing.T) {
 	resourceVersion := metadata["resourceVersion"].(string)
 
 	// Get object
-	resp, body = doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -245,7 +250,7 @@ func TestObjectCRUD(t *testing.T) {
 	}
 
 	// List objects
-	resp, body = doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -276,7 +281,7 @@ func TestObjectCRUD(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "PUT", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
+	resp, body = doRequest(t, http.MethodPut, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -289,13 +294,13 @@ func TestObjectCRUD(t *testing.T) {
 	}
 
 	// Delete object
-	resp, body = doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Verify object is deleted
-	resp, _ = doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, _ = doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("Expected status 404 after delete, got %d", resp.StatusCode)
 	}
@@ -323,7 +328,7 @@ func TestDefaulting(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -338,7 +343,7 @@ func TestDefaulting(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestPruning(t *testing.T) {
@@ -364,7 +369,7 @@ func TestPruning(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -379,7 +384,7 @@ func TestPruning(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestValidation(t *testing.T) {
@@ -400,12 +405,12 @@ func TestValidation(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	// GenericAPIServer returns 422 (Unprocessable Entity) for validation errors instead of 400.
 	// If the object was created (201), validation is not being enforced by the strategy.
 	if resp.StatusCode == http.StatusCreated {
 		// Cleanup the accidentally created object
-		doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+		doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 		t.Skip("structural schema validation not enforced by GenericAPIServer strategy — tracked for follow-up")
 	}
 	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity {
@@ -440,7 +445,7 @@ func TestStatusSubresource(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -469,7 +474,7 @@ func TestStatusSubresource(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "PUT", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s/status", namespace, name), statusPayload)
+	resp, body = doRequest(t, http.MethodPut, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s/status", namespace, name), statusPayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -497,19 +502,19 @@ func TestStatusSubresource(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestCORS(t *testing.T) {
 	t.Skip("CORS middleware not applicable to GenericAPIServer")
 
 	// Make an OPTIONS request (preflight)
-	req, err := http.NewRequest("OPTIONS", baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects", nil)
+	req, err := http.NewRequest(http.MethodOptions, baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Origin", "http://example.com")
-	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
 
 	client := &http.Client{
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
@@ -551,7 +556,7 @@ func TestGenerationTracking(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -584,7 +589,7 @@ func TestGenerationTracking(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "PUT", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
+	resp, body = doRequest(t, http.MethodPut, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -601,7 +606,7 @@ func TestGenerationTracking(t *testing.T) {
 	resourceVersion = updated["metadata"].(map[string]interface{})["resourceVersion"].(string)
 	updatePayload["metadata"].(map[string]interface{})["resourceVersion"] = resourceVersion
 
-	resp, body = doRequest(t, "PUT", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
+	resp, body = doRequest(t, http.MethodPut, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -615,7 +620,7 @@ func TestGenerationTracking(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestLabelSelector(t *testing.T) {
@@ -652,7 +657,7 @@ func TestLabelSelector(t *testing.T) {
 			},
 		}
 
-		resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+		resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 		}
@@ -708,7 +713,7 @@ func TestLabelSelector(t *testing.T) {
 				path += "?labelSelector=" + url.QueryEscape(tc.selector)
 			}
 
-			resp, body := doRequest(t, "GET", path, nil)
+			resp, body := doRequest(t, http.MethodGet, path, nil)
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 			}
@@ -739,7 +744,7 @@ func TestLabelSelector(t *testing.T) {
 	t.Run("Invalid label selector", func(t *testing.T) {
 		path := fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace)
 		path += "?labelSelector=" + url.QueryEscape("invalid!selector")
-		resp, _ := doRequest(t, "GET", path, nil)
+		resp, _ := doRequest(t, http.MethodGet, path, nil)
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("Expected status 400 for invalid selector, got %d", resp.StatusCode)
 		}
@@ -747,12 +752,12 @@ func TestLabelSelector(t *testing.T) {
 
 	// Cleanup
 	for _, obj := range objects {
-		doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, obj.name), nil)
+		doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, obj.name), nil)
 	}
 }
 
 func TestDiscoveryAPIGroupList(t *testing.T) {
-	resp, body := doRequest(t, "GET", "/apis", nil)
+	resp, body := doRequest(t, http.MethodGet, "/apis", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -788,7 +793,7 @@ func TestDiscoveryAPIGroupList(t *testing.T) {
 }
 
 func TestDiscoveryAPIGroup(t *testing.T) {
-	resp, body := doRequest(t, "GET", "/apis/test.orlop.gcp.managed.openshift.io", nil)
+	resp, body := doRequest(t, http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -811,7 +816,7 @@ func TestDiscoveryAPIGroup(t *testing.T) {
 }
 
 func TestDiscoveryAPIResourceList(t *testing.T) {
-	resp, body := doRequest(t, "GET", "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+	resp, body := doRequest(t, http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -863,7 +868,7 @@ func TestDiscoveryAPIResourceList(t *testing.T) {
 }
 
 func TestDiscoveryOpenAPIV3(t *testing.T) {
-	resp, body := doRequest(t, "GET", "/openapi/v3", nil)
+	resp, body := doRequest(t, http.MethodGet, "/openapi/v3", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -881,7 +886,7 @@ func TestDiscoveryOpenAPIV3(t *testing.T) {
 }
 
 func TestDiscoveryOpenAPIV3GroupVersion(t *testing.T) {
-	resp, body := doRequest(t, "GET", "/openapi/v3/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+	resp, body := doRequest(t, http.MethodGet, "/openapi/v3/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -915,7 +920,7 @@ func TestSharedResourceVersion(t *testing.T) {
 	namespace := "default"
 
 	// List objects initially - should get initial resource version
-	resp, body := doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
+	resp, body := doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -943,7 +948,7 @@ func TestSharedResourceVersion(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), obj1Payload)
+	resp, body = doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), obj1Payload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -972,7 +977,7 @@ func TestSharedResourceVersion(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others", namespace), other1Payload)
+	resp, body = doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others", namespace), other1Payload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -989,7 +994,7 @@ func TestSharedResourceVersion(t *testing.T) {
 	}
 
 	// List objects - should return resource version from objects store
-	resp, body = doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -1005,8 +1010,8 @@ func TestSharedResourceVersion(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/test-obj", namespace), nil)
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others/test-other", namespace), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/test-obj", namespace), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others/test-other", namespace), nil)
 }
 
 func TestCreateReturnsResourceVersion(t *testing.T) {
@@ -1031,7 +1036,7 @@ func TestCreateReturnsResourceVersion(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -1070,11 +1075,11 @@ func TestCreateReturnsResourceVersion(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestDiscoveryOpenAPIV2(t *testing.T) {
-	resp, body := doRequest(t, "GET", "/openapi/v2", nil)
+	resp, body := doRequest(t, http.MethodGet, "/openapi/v2", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -1129,7 +1134,7 @@ func TestWatchBookmarks(t *testing.T) {
 
 	watchURL := fmt.Sprintf("%s/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects?watch=true&allowWatchBookmarks=true", baseURL, namespace)
 
-	watchReq, err := http.NewRequestWithContext(ctx, "GET", watchURL, nil)
+	watchReq, err := http.NewRequestWithContext(ctx, http.MethodGet, watchURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create watch request: %v", err)
 	}
@@ -1231,7 +1236,7 @@ func TestWatchWithoutBookmarks(t *testing.T) {
 
 	watchURL := fmt.Sprintf("%s/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects?watch=true", baseURL, namespace)
 
-	watchReq, err := http.NewRequestWithContext(ctx, "GET", watchURL, nil)
+	watchReq, err := http.NewRequestWithContext(ctx, http.MethodGet, watchURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create watch request: %v", err)
 	}
@@ -1317,7 +1322,7 @@ func TestWatch(t *testing.T) {
 
 	watchURL := fmt.Sprintf("%s/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects?watch=true", baseURL, namespace)
 
-	watchReq, err := http.NewRequestWithContext(ctx, "GET", watchURL, nil)
+	watchReq, err := http.NewRequestWithContext(ctx, http.MethodGet, watchURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create watch request: %v", err)
 	}
@@ -1396,7 +1401,7 @@ func TestWatch(t *testing.T) {
 		},
 	}
 
-	doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 
 	// Wait for ADDED event and extract resourceVersion
 	var currentResourceVersion string
@@ -1434,7 +1439,7 @@ func TestWatch(t *testing.T) {
 		},
 	}
 
-	doRequest(t, "PUT", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/watch-test", namespace), updatePayload)
+	doRequest(t, http.MethodPut, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/watch-test", namespace), updatePayload)
 
 	// Wait for MODIFIED event
 	select {
@@ -1447,7 +1452,7 @@ func TestWatch(t *testing.T) {
 	}
 
 	// Delete the object
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/watch-test", namespace), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/watch-test", namespace), nil)
 
 	// Wait for DELETED event
 	select {
@@ -1481,7 +1486,7 @@ func TestWatchSendInitialEvents(t *testing.T) {
 				},
 			},
 		}
-		doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+		doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	}
 
 	// Start watch with sendInitialEvents=true (requires resourceVersion and resourceVersionMatch per streaming list protocol)
@@ -1490,7 +1495,7 @@ func TestWatchSendInitialEvents(t *testing.T) {
 
 	watchURL := fmt.Sprintf("%s/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects?watch=true&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersion=0&resourceVersionMatch=NotOlderThan", baseURL, namespace)
 
-	watchReq, err := http.NewRequestWithContext(ctx, "GET", watchURL, nil)
+	watchReq, err := http.NewRequestWithContext(ctx, http.MethodGet, watchURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create watch request: %v", err)
 	}
@@ -1614,7 +1619,7 @@ drainLoop:
 
 	// Cleanup
 	for i := 1; i <= 3; i++ {
-		doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/initial-event-test-%d", namespace, i), nil)
+		doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/initial-event-test-%d", namespace, i), nil)
 	}
 }
 
@@ -1636,19 +1641,19 @@ func TestOtherResource(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others", namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected status 201, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Get Other resource
-	resp, body = doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others/%s", namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others/%s", namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/others/%s", namespace, name), nil)
 }
 
 func TestClusterScopedList(t *testing.T) {
@@ -1682,7 +1687,7 @@ func TestClusterScopedList(t *testing.T) {
 			},
 		}
 
-		resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", obj.namespace), createPayload)
+		resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", obj.namespace), createPayload)
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("Failed to create object %s/%s: status %d: %s", obj.namespace, obj.name, resp.StatusCode, body)
 		}
@@ -1690,7 +1695,7 @@ func TestClusterScopedList(t *testing.T) {
 
 	// Test cluster-scoped LIST (all namespaces)
 	t.Run("Cluster-scoped LIST returns all objects", func(t *testing.T) {
-		resp, body := doRequest(t, "GET", "/apis/test.orlop.gcp.managed.openshift.io/v1/objects", nil)
+		resp, body := doRequest(t, http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1/objects", nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 		}
@@ -1734,7 +1739,7 @@ func TestClusterScopedList(t *testing.T) {
 
 	// Test namespace-scoped LIST only returns objects from that namespace
 	t.Run("Namespace-scoped LIST returns only objects from that namespace", func(t *testing.T) {
-		resp, body := doRequest(t, "GET", "/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects", nil)
+		resp, body := doRequest(t, http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects", nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 		}
@@ -1794,11 +1799,11 @@ func TestClusterScopedList(t *testing.T) {
 				},
 			}
 
-			doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", obj.namespace), createPayload)
+			doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", obj.namespace), createPayload)
 		}
 
 		// Query cluster-scoped with label selector
-		resp, body := doRequest(t, "GET", "/apis/test.orlop.gcp.managed.openshift.io/v1/objects?labelSelector="+url.QueryEscape("env=prod"), nil)
+		resp, body := doRequest(t, http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1/objects?labelSelector="+url.QueryEscape("env=prod"), nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, body)
 		}
@@ -1831,13 +1836,13 @@ func TestClusterScopedList(t *testing.T) {
 
 		// Cleanup labeled objects
 		for _, obj := range labeledObjects {
-			doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", obj.namespace, obj.name), nil)
+			doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", obj.namespace, obj.name), nil)
 		}
 	})
 
 	// Cleanup all created objects
 	for _, obj := range objects {
-		doRequest(t, "DELETE", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", obj.namespace, obj.name), nil)
+		doRequest(t, http.MethodDelete, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", obj.namespace, obj.name), nil)
 	}
 }
 
@@ -1865,7 +1870,7 @@ func TestGenerateName(t *testing.T) {
 		"spec": spec,
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), payload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), payload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201 Created, got %d: %s", resp.StatusCode, body)
 	}
@@ -1884,13 +1889,13 @@ func TestGenerateName(t *testing.T) {
 	t.Logf("Generated name: %s", name)
 
 	// Verify the object can be retrieved by the generated name
-	resp, body = doRequest(t, "GET", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200 OK for GET by generated name, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Create a second object with the same prefix to verify uniqueness
-	resp, body = doRequest(t, "POST", fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), payload)
+	resp, body = doRequest(t, http.MethodPost, fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), payload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201 Created for second object, got %d: %s", resp.StatusCode, body)
 	}

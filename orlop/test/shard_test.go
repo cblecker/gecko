@@ -167,7 +167,7 @@ func TestShardSelectorList(t *testing.T) {
 	// Cleanup: delete created objects
 	for _, name := range createdNames {
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -291,7 +291,7 @@ func TestShardSelectorDeterministic(t *testing.T) {
 
 	// Cleanup
 	req, _ := http.NewRequest(
-		"DELETE",
+		http.MethodDelete,
 		baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 		nil,
 	)

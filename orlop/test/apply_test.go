@@ -28,7 +28,7 @@ spec:
   publicField: initial-value
 `
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/apply-test-create?fieldManager=test-controller",
 			bytes.NewBufferString(applyConfig),
 		)
@@ -81,7 +81,7 @@ spec:
 			},
 		}
 		createJSON, _ := json.Marshal(createBody)
-		createReq, _ := http.NewRequest("POST",
+		createReq, _ := http.NewRequest(http.MethodPost,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects",
 			bytes.NewBuffer(createJSON),
 		)
@@ -107,7 +107,7 @@ spec:
   publicField: updated-via-apply
 `
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/apply-test-update?fieldManager=test-controller&force=true",
 			bytes.NewBufferString(applyConfig),
 		)
@@ -151,7 +151,7 @@ spec:
 		applyJSON, _ := json.Marshal(applyConfig)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/apply-test-json?fieldManager=json-controller",
 			bytes.NewBuffer(applyJSON),
 		)
@@ -182,7 +182,7 @@ spec:
   publicField: value
 `
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/test-obj",
 			bytes.NewBufferString(applyConfig),
 		)
@@ -218,7 +218,7 @@ spec:
     internalField: ""
 `
 		req1, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/multi-manager-test?fieldManager=controller-a",
 			bytes.NewBufferString(applyConfig1),
 		)
@@ -249,7 +249,7 @@ spec:
     internalField: ""
 `
 		req2, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/multi-manager-test?fieldManager=controller-b&force=true",
 			bytes.NewBufferString(applyConfig2),
 		)
@@ -297,7 +297,7 @@ spec:
   publicField: owned-by-a
 `
 		req1, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/conflict-test?fieldManager=controller-a",
 			bytes.NewBufferString(applyConfig1),
 		)
@@ -316,7 +316,7 @@ spec:
   publicField: trying-to-own
 `
 		req2, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/conflict-test?fieldManager=controller-b&force=false",
 			bytes.NewBufferString(applyConfig2),
 		)
@@ -346,7 +346,7 @@ spec:
   publicField: owned-by-a
 `
 		req1, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/force-test?fieldManager=controller-a",
 			bytes.NewBufferString(applyConfig1),
 		)
@@ -365,7 +365,7 @@ spec:
   publicField: forced-takeover
 `
 		req2, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/force-test?fieldManager=controller-b&force=true",
 			bytes.NewBufferString(applyConfig2),
 		)
@@ -408,7 +408,7 @@ spec:
   publicField: test-value
 `
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/managed-fields-test?fieldManager=my-controller",
 			bytes.NewBufferString(applyConfig),
 		)
@@ -478,7 +478,7 @@ spec:
     internalField: ""
 `
 		req1, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/multi-manager-fields?fieldManager=manager-1",
 			bytes.NewBufferString(applyConfig1),
 		)
@@ -500,7 +500,7 @@ spec:
     internalField: ""
 `
 		req2, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/multi-manager-fields?fieldManager=manager-2&force=true",
 			bytes.NewBufferString(applyConfig2),
 		)
@@ -568,7 +568,7 @@ spec:
     internalField: ""
 `
 		req1, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/partial-apply-test?fieldManager=initial-controller",
 			bytes.NewBufferString(applyConfig1),
 		)
@@ -590,7 +590,7 @@ spec:
     internalField: ""
 `
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/partial-apply-test?fieldManager=partial-controller&force=true",
 			bytes.NewBufferString(applyConfig),
 		)
@@ -642,7 +642,7 @@ spec:
   publicField: created-via-apply
 `
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/apply-create-if-missing?fieldManager=creator",
 			bytes.NewBufferString(applyConfig),
 		)
@@ -661,7 +661,7 @@ spec:
 		}
 
 		// Verify the object exists by getting it
-		getReq, _ := http.NewRequest("GET", baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/apply-create-if-missing", nil)
+		getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/default/objects/apply-create-if-missing", nil)
 		getResp, err := applyClient.Do(getReq)
 		if err != nil {
 			t.Fatalf("GET request failed: %v", err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,10 +42,14 @@ import (
 func TestPrivateFieldSecurity(t *testing.T) {
 	// Setup dedicated test server
 	privateScheme := runtime.NewScheme()
-	privatev1.AddToScheme(privateScheme)
+	if err := privatev1.AddToScheme(privateScheme); err != nil {
+		t.Fatalf("failed to register private API types: %v", err)
+	}
 
 	publicScheme := runtime.NewScheme()
-	publicv1.AddToScheme(publicScheme)
+	if err := publicv1.AddToScheme(publicScheme); err != nil {
+		t.Fatalf("failed to register public API types: %v", err)
+	}
 
 	gvk := runtimeschema.GroupVersionKind{
 		Group:   "test.orlop.gcp.managed.openshift.io",
@@ -91,7 +96,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 	publicURL := fmt.Sprintf("http://%s", server.PublicAddress())
 
 	go func() {
-		if err := server.Run(); err != nil && err != http.ErrServerClosed {
+		if err := server.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Logf("Test server error: %v", err)
 		}
 	}()
@@ -150,7 +155,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 			t.Fatalf("request error: %v", err)
 		}
 		if body != nil {
-			if method == "PATCH" {
+			if method == http.MethodPatch {
 				req.Header.Set("Content-Type", "application/merge-patch+json")
 			} else {
 				req.Header.Set("Content-Type", "application/json")
@@ -171,7 +176,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	publicCreate := func(t *testing.T, name string, obj map[string]interface{}) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, pubClient, "POST", publicURL+apiPath, obj)
+		code, result := do(t, pubClient, http.MethodPost, publicURL+apiPath, obj)
 		if code != http.StatusCreated {
 			t.Fatalf("public create %s: expected 201, got %d: %v", name, code, result)
 		}
@@ -180,7 +185,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	privateCreate := func(t *testing.T, name string, obj map[string]interface{}) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, privClient, "POST", privateURL+apiPath, obj)
+		code, result := do(t, privClient, http.MethodPost, privateURL+apiPath, obj)
 		if code != http.StatusCreated {
 			t.Fatalf("private create %s: expected 201, got %d: %v", name, code, result)
 		}
@@ -189,7 +194,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	publicGet := func(t *testing.T, name string) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, pubClient, "GET", publicURL+apiPath+"/"+name, nil)
+		code, result := do(t, pubClient, http.MethodGet, publicURL+apiPath+"/"+name, nil)
 		if code != http.StatusOK {
 			t.Fatalf("public get %s: expected 200, got %d", name, code)
 		}
@@ -198,7 +203,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	privateGet := func(t *testing.T, name string) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, privClient, "GET", privateURL+apiPath+"/"+name, nil)
+		code, result := do(t, privClient, http.MethodGet, privateURL+apiPath+"/"+name, nil)
 		if code != http.StatusOK {
 			t.Fatalf("private get %s: expected 200, got %d", name, code)
 		}
@@ -207,7 +212,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	publicUpdate := func(t *testing.T, name string, obj map[string]interface{}) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, pubClient, "PUT", publicURL+apiPath+"/"+name, obj)
+		code, result := do(t, pubClient, http.MethodPut, publicURL+apiPath+"/"+name, obj)
 		if code != http.StatusOK {
 			t.Fatalf("public update %s: expected 200, got %d: %v", name, code, result)
 		}
@@ -216,7 +221,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	publicPatch := func(t *testing.T, name string, patch map[string]interface{}) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, pubClient, "PATCH", publicURL+apiPath+"/"+name, patch)
+		code, result := do(t, pubClient, http.MethodPatch, publicURL+apiPath+"/"+name, patch)
 		if code != http.StatusOK {
 			t.Fatalf("public patch %s: expected 200, got %d: %v", name, code, result)
 		}
@@ -225,7 +230,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	privateUpdate := func(t *testing.T, name string, obj map[string]interface{}) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, privClient, "PUT", privateURL+apiPath+"/"+name, obj)
+		code, result := do(t, privClient, http.MethodPut, privateURL+apiPath+"/"+name, obj)
 		if code != http.StatusOK {
 			t.Fatalf("private update %s: expected 200, got %d: %v", name, code, result)
 		}
@@ -234,7 +239,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	cleanup := func(t *testing.T, name string) {
 		t.Helper()
-		do(t, privClient, "DELETE", privateURL+apiPath+"/"+name, nil)
+		do(t, privClient, http.MethodDelete, privateURL+apiPath+"/"+name, nil)
 	}
 
 	// Base object for most tests
@@ -1107,7 +1112,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	publicList := func(t *testing.T) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, pubClient, "GET", publicURL+apiPath, nil)
+		code, result := do(t, pubClient, http.MethodGet, publicURL+apiPath, nil)
 		if code != http.StatusOK {
 			t.Fatalf("public list: expected 200, got %d: %v", code, result)
 		}
@@ -1116,12 +1121,12 @@ func TestPrivateFieldSecurity(t *testing.T) {
 
 	publicDelete := func(t *testing.T, name string) (int, map[string]interface{}) {
 		t.Helper()
-		return do(t, pubClient, "DELETE", publicURL+apiPath+"/"+name, nil)
+		return do(t, pubClient, http.MethodDelete, publicURL+apiPath+"/"+name, nil)
 	}
 
 	privatePatch := func(t *testing.T, name string, patch map[string]interface{}) map[string]interface{} {
 		t.Helper()
-		code, result := do(t, privClient, "PATCH", privateURL+apiPath+"/"+name, patch)
+		code, result := do(t, privClient, http.MethodPatch, privateURL+apiPath+"/"+name, patch)
 		if code != http.StatusOK {
 			t.Fatalf("private patch %s: expected 200, got %d: %v", name, code, result)
 		}
@@ -1249,7 +1254,7 @@ func TestPrivateFieldSecurity(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		watchReq, err := http.NewRequestWithContext(ctx, "GET", publicURL+apiPath+"?watch=true", nil)
+		watchReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicURL+apiPath+"?watch=true", nil)
 		if err != nil {
 			t.Fatalf("watch request error: %v", err)
 		}

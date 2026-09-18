@@ -222,7 +222,7 @@ func TestIntegration_CRUD(t *testing.T) {
 	}
 
 	createBody, _ := json.Marshal(obj)
-	resp, err := doRequest(env.client, "POST", env.url(basePath), createBody)
+	resp, err := doRequest(env.client, http.MethodPost, env.url(basePath), createBody)
 	if err != nil {
 		t.Fatalf("CREATE failed: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestIntegration_CRUD(t *testing.T) {
 	// UPDATE
 	fetched.Spec.PublicField = "updated-value"
 	updateBody, _ := json.Marshal(fetched)
-	resp, err = doRequest(env.client, "PUT", env.url(basePath+"/integration-test"), updateBody)
+	resp, err = doRequest(env.client, http.MethodPut, env.url(basePath+"/integration-test"), updateBody)
 	if err != nil {
 		t.Fatalf("UPDATE failed: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestIntegration_CRUD(t *testing.T) {
 	}
 
 	// DELETE
-	resp, err = doRequest(env.client, "DELETE", env.url(basePath+"/integration-test"), nil)
+	resp, err = doRequest(env.client, http.MethodDelete, env.url(basePath+"/integration-test"), nil)
 	if err != nil {
 		t.Fatalf("DELETE failed: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestIntegration_StatusSubresource(t *testing.T) {
 	}
 
 	createBody, _ := json.Marshal(obj)
-	resp, err := doRequest(env.client, "POST", env.url(basePath), createBody)
+	resp, err := doRequest(env.client, http.MethodPost, env.url(basePath), createBody)
 	if err != nil {
 		t.Fatalf("CREATE failed: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestIntegration_StatusSubresource(t *testing.T) {
 	created.Status.Conditions = []string{"Ready"}
 	created.Spec.PublicField = "should-be-ignored"
 	statusBody, _ := json.Marshal(created)
-	resp, err = doRequest(env.client, "PUT", env.url(basePath+"/status-test/status"), statusBody)
+	resp, err = doRequest(env.client, http.MethodPut, env.url(basePath+"/status-test/status"), statusBody)
 	if err != nil {
 		t.Fatalf("STATUS UPDATE failed: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestIntegration_FinalizerSoftDelete(t *testing.T) {
 	}
 
 	createBody, _ := json.Marshal(obj)
-	resp, _ := doRequest(env.client, "POST", env.url(basePath), createBody)
+	resp, _ := doRequest(env.client, http.MethodPost, env.url(basePath), createBody)
 	respBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
@@ -419,7 +419,7 @@ func TestIntegration_FinalizerSoftDelete(t *testing.T) {
 	}
 
 	// Delete — should soft-delete (set deletionTimestamp).
-	resp, _ = doRequest(env.client, "DELETE", env.url(basePath+"/finalizer-test"), nil)
+	resp, _ = doRequest(env.client, http.MethodDelete, env.url(basePath+"/finalizer-test"), nil)
 	respBody, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -448,7 +448,7 @@ func TestIntegration_FinalizerSoftDelete(t *testing.T) {
 	json.Unmarshal(respBody, &current)
 	current.Finalizers = nil
 	updateBody, _ := json.Marshal(current)
-	resp, _ = doRequest(env.client, "PUT", env.url(basePath+"/finalizer-test"), updateBody)
+	resp, _ = doRequest(env.client, http.MethodPut, env.url(basePath+"/finalizer-test"), updateBody)
 	resp.Body.Close()
 
 	// Now it should be gone.
@@ -550,7 +550,7 @@ func TestIntegration_Watch(t *testing.T) {
 	defer cancel()
 
 	// Start watch.
-	req, _ := http.NewRequestWithContext(ctx, "GET", env.url(basePath+"?watch=true"), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, env.url(basePath+"?watch=true"), nil)
 	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatalf("WATCH failed: %v", err)
@@ -578,7 +578,7 @@ func TestIntegration_Watch(t *testing.T) {
 		},
 	}
 	createBody, _ := json.Marshal(obj)
-	createResp, err := doRequest(env.client, "POST", env.url(basePath), createBody)
+	createResp, err := doRequest(env.client, http.MethodPost, env.url(basePath), createBody)
 	if err != nil {
 		t.Fatalf("CREATE during watch failed: %v", err)
 	}

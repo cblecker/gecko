@@ -138,7 +138,7 @@ func TestPagination(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		name := fmt.Sprintf("page-test-%02d", i)
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)

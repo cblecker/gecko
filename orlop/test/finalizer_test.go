@@ -49,7 +49,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// Delete object
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -118,7 +118,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// Delete object (should set deletionTimestamp)
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -211,7 +211,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// Soft delete (set deletionTimestamp)
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -245,7 +245,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		updateJSON, _ := json.Marshal(updateBody)
 		updateReq, _ := http.NewRequest(
-			"PUT",
+			http.MethodPut,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(updateJSON),
 		)
@@ -331,7 +331,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// Soft-delete (sets deletionTimestamp)
 		delReq, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -364,7 +364,7 @@ func TestFinalizerDeletion(t *testing.T) {
 		}
 		patchJSON, _ := json.Marshal(patchBody)
 		patchReq, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -441,7 +441,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// Soft-delete
 		delReq, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -473,7 +473,7 @@ func TestFinalizerDeletion(t *testing.T) {
 		}
 		patchJSON, _ := json.Marshal(patchBody)
 		patchReq, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -544,7 +544,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// First delete
 		req1, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -558,7 +558,7 @@ func TestFinalizerDeletion(t *testing.T) {
 
 		// Second delete (should still succeed but not change anything)
 		req2, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -228,7 +229,7 @@ func (s *PostgresStore) Create(ctx context.Context, obj client.Object) error {
 				if useGenerateName && attempt < maxAttempts-1 {
 					continue
 				}
-				return errors.NewAlreadyExists(
+				return apierrors.NewAlreadyExists(
 					schema.GroupResource{Resource: s.resourceType},
 					name,
 				)
@@ -285,8 +286,8 @@ func (s *PostgresStore) Get(ctx context.Context, namespace, name string) (client
 	var data []byte
 	var rv int64
 	err = row.Scan(&data, &rv)
-	if err == sql.ErrNoRows {
-		return nil, errors.NewNotFound(
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, apierrors.NewNotFound(
 			schema.GroupResource{Resource: s.resourceType},
 			name,
 		)
@@ -456,7 +457,7 @@ func (s *PostgresStore) Update(ctx context.Context, obj client.Object) error {
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		tx.Rollback()
-		return errors.NewNotFound(
+		return apierrors.NewNotFound(
 			schema.GroupResource{Resource: s.resourceType},
 			name,
 		)
@@ -530,7 +531,7 @@ func (s *PostgresStore) Delete(ctx context.Context, namespace, name string) erro
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		tx.Rollback()
-		return errors.NewNotFound(
+		return apierrors.NewNotFound(
 			schema.GroupResource{Resource: s.resourceType},
 			name,
 		)

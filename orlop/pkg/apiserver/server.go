@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -226,7 +227,7 @@ func (s *Server) Run() error {
 	if s.options.Public.Enable && s.publicServer != nil {
 		s.logger.Info("Public API server listening", "addr", s.publicServer.Addr)
 		go func() {
-			if err := s.publicServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := s.publicServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				s.logger.Error(err, "Public API server error")
 				errCh <- err
 			}

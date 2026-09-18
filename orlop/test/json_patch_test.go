@@ -57,7 +57,7 @@ func TestJSONPatch(t *testing.T) {
 		patchJSON, _ := json.Marshal(patchOps)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -133,7 +133,7 @@ func TestJSONPatch(t *testing.T) {
 		patchJSON, _ := json.Marshal(patchOps)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -205,7 +205,7 @@ func TestJSONPatch(t *testing.T) {
 		patchJSON, _ := json.Marshal(patchOps)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -292,7 +292,7 @@ func TestJSONPatch(t *testing.T) {
 		patchJSON, _ := json.Marshal(patchOps)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -381,7 +381,7 @@ func TestJSONPatch(t *testing.T) {
 		patchJSON, _ := json.Marshal(patchOps)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -457,7 +457,7 @@ func TestJSONPatch(t *testing.T) {
 		patchJSON, _ := json.Marshal(patchOps)
 
 		req, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)

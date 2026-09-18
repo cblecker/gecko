@@ -95,25 +95,25 @@ func (h *ResourceHandler) applyPatch(contentType string, existing client.Object,
 		// JSON Patch (RFC 6902)
 		patchedJSON, err = h.jsonPatch(existingJSON, patchBytes)
 		if err != nil {
-			return nil, fmt.Errorf("json patch failed: %v", err)
+			return nil, fmt.Errorf("json patch failed: %w", err)
 		}
 	case constants.ContentTypeMergePatch:
 		// JSON Merge Patch (RFC 7386)
 		patchedJSON, err = jsonMergePatch(existingJSON, patchBytes)
 		if err != nil {
-			return nil, fmt.Errorf("merge patch failed: %v", err)
+			return nil, fmt.Errorf("merge patch failed: %w", err)
 		}
 	case constants.ContentTypeStrategicMergePatch:
 		// Strategic Merge Patch (Kubernetes default)
 		patchedJSON, err = h.strategicMergePatch(existing, patchBytes)
 		if err != nil {
-			return nil, fmt.Errorf("strategic merge patch failed: %v", err)
+			return nil, fmt.Errorf("strategic merge patch failed: %w", err)
 		}
 	default:
 		// Default to merge patch
 		patchedJSON, err = jsonMergePatch(existingJSON, patchBytes)
 		if err != nil {
-			return nil, fmt.Errorf("patch failed: %v", err)
+			return nil, fmt.Errorf("patch failed: %w", err)
 		}
 	}
 

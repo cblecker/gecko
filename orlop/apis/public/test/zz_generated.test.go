@@ -1,10 +1,10 @@
 package test
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
-
 	v1 "github.com/openshift-online/gecko/orlop/apis/public/test/v1"
 	v2 "github.com/openshift-online/gecko/orlop/apis/public/test/v2"
+
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // AddToSchemes may be used to add all resources defined in the project to a Scheme.

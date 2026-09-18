@@ -89,12 +89,6 @@ linters:
     presets:
       - std-error-handling
     rules:
-      # ── errcheck ───────────────────────────────────────────────────────────
-      # AddToScheme only errors on duplicate type registrations, caught at startup.
-      - linters:
-          - errcheck
-        text: 'Error return value is not checked'
-        source: 'AddToScheme'
       # ── unused ────────────────────────────────────────────────────────────
       # localSchemeBuilder is a side-effect assignment in the scheme registration
       # pattern required by controller-runtime.

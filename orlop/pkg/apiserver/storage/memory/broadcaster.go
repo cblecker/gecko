@@ -46,7 +46,7 @@ func (wb *WatchBuffer) GetEventsSince(resourceVersion string) ([]storage.Resourc
 
 	requestedRV, err := strconv.ParseInt(resourceVersion, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("invalid resourceVersion: %v", err)
+		return nil, fmt.Errorf("invalid resourceVersion: %w", err)
 	}
 
 	var result []storage.ResourceEvent

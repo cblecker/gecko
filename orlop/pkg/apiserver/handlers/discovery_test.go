@@ -47,7 +47,7 @@ func TestAPIResourceList_AdvertiseStatusFalse(t *testing.T) {
 	})
 
 	// Create test request
-	req := httptest.NewRequest("GET", "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 	w := httptest.NewRecorder()
 
 	// Call handler
@@ -101,7 +101,7 @@ func TestAPIResourceList_AdvertiseStatusTrue(t *testing.T) {
 	})
 
 	// Create test request
-	req := httptest.NewRequest("GET", "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 	w := httptest.NewRecorder()
 
 	// Call handler
@@ -164,7 +164,7 @@ func TestAPIResourceList_AdvertiseStatusNil(t *testing.T) {
 	})
 
 	// Create test request
-	req := httptest.NewRequest("GET", "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 	w := httptest.NewRecorder()
 
 	// Call handler
@@ -233,7 +233,7 @@ func TestAPIResourceList_MultipleResources(t *testing.T) {
 			AdvertiseStatus: &advertiseStatus,
 		})
 
-		req := httptest.NewRequest("GET", "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+		req := httptest.NewRequest(http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 		w := httptest.NewRecorder()
 
 		handler.APIResourceList(w, req, "test.orlop.gcp.managed.openshift.io", "v1")
@@ -266,7 +266,7 @@ func TestAPIResourceList_MultipleResources(t *testing.T) {
 			AdvertiseStatus: &advertiseStatus,
 		})
 
-		req := httptest.NewRequest("GET", "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
+		req := httptest.NewRequest(http.MethodGet, "/apis/test.orlop.gcp.managed.openshift.io/v1", nil)
 		w := httptest.NewRecorder()
 
 		handler.APIResourceList(w, req, "test.orlop.gcp.managed.openshift.io", "v1")

@@ -217,9 +217,11 @@ func streamWatch(
 
 			// Send bookmark marking end of initial events
 			if config.allowWatchBookmarks {
-				streamer.sendBookmark(map[string]interface{}{
+				if err := streamer.sendBookmark(map[string]interface{}{
 					constants.AnnotationInitialEventsEnd: "true",
-				})
+				}); err != nil {
+					return
+				}
 				streamer.initialBookmarkSent = true
 			}
 		}
@@ -231,7 +233,9 @@ func streamWatch(
 		requestedRV = "0"
 	}
 	if !config.sendInitialEvents {
-		streamer.sendInitialBookmarkIfCaughtUp(requestedRV, config.allowWatchBookmarks)
+		if err := streamer.sendInitialBookmarkIfCaughtUp(requestedRV, config.allowWatchBookmarks); err != nil {
+			return
+		}
 	}
 
 	// Main event loop

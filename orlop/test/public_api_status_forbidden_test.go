@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -95,7 +96,7 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 	publicURL := fmt.Sprintf("http://%s", server.PublicAddress())
 
 	go func() {
-		if err := server.Run(); err != nil && err != http.ErrServerClosed {
+		if err := server.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Logf("Test server error: %v", err)
 		}
 	}()
@@ -156,7 +157,7 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 			},
 		}
 
-		createResp := httpDo(t, pubClient, "POST", publicURL+apiPath, createObj)
+		createResp := httpDo(t, pubClient, http.MethodPost, publicURL+apiPath, createObj)
 		if createResp.StatusCode != http.StatusCreated {
 			t.Fatalf("create failed: expected 201, got %d: %s", createResp.StatusCode, createResp.Body)
 		}
@@ -180,7 +181,7 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 			},
 		}
 
-		statusResp := httpDo(t, pubClient, "PUT", statusURL, statusObj)
+		statusResp := httpDo(t, pubClient, http.MethodPut, statusURL, statusObj)
 
 		// Verify: status endpoint should return 404 Not Found
 		if statusResp.StatusCode != http.StatusNotFound {
@@ -191,7 +192,7 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 		t.Logf("✓ Public API UpdateStatus correctly blocked with HTTP 404")
 
 		// Cleanup
-		httpDo(t, privClient, "DELETE", privateURL+apiPath+"/"+name, nil)
+		httpDo(t, privClient, http.MethodDelete, privateURL+apiPath+"/"+name, nil)
 	})
 
 	t.Run("Private API status endpoint still works", func(t *testing.T) {
@@ -209,7 +210,7 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 			},
 		}
 
-		createResp := httpDo(t, privClient, "POST", privateURL+apiPath, createObj)
+		createResp := httpDo(t, privClient, http.MethodPost, privateURL+apiPath, createObj)
 		if createResp.StatusCode != http.StatusCreated {
 			t.Fatalf("private create failed: expected 201, got %d", createResp.StatusCode)
 		}
@@ -231,14 +232,14 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 			},
 		}
 
-		statusResp := httpDo(t, privClient, "PUT", statusURL, statusObj)
+		statusResp := httpDo(t, privClient, http.MethodPut, statusURL, statusObj)
 		if statusResp.StatusCode != http.StatusOK {
 			t.Fatalf("private API UpdateStatus should succeed, got %d: %s",
 				statusResp.StatusCode, statusResp.Body)
 		}
 
 		// Verify status was actually updated
-		getResp := httpDo(t, privClient, "GET", privateURL+apiPath+"/"+name, nil)
+		getResp := httpDo(t, privClient, http.MethodGet, privateURL+apiPath+"/"+name, nil)
 		if getResp.StatusCode != http.StatusOK {
 			t.Fatalf("private get failed: expected 200, got %d", getResp.StatusCode)
 		}
@@ -259,13 +260,13 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 		t.Logf("✓ Private API UpdateStatus works correctly")
 
 		// Cleanup
-		httpDo(t, privClient, "DELETE", privateURL+apiPath+"/"+name, nil)
+		httpDo(t, privClient, http.MethodDelete, privateURL+apiPath+"/"+name, nil)
 	})
 
 	t.Run("Public API discovery does not advertise status subresource", func(t *testing.T) {
 		// Verify discovery endpoint returns valid response
 		discoveryURL := publicURL + "/apis/test.orlop.gcp.managed.openshift.io/v1"
-		discoveryResp := httpDo(t, pubClient, "GET", discoveryURL, nil)
+		discoveryResp := httpDo(t, pubClient, http.MethodGet, discoveryURL, nil)
 
 		if discoveryResp.StatusCode != http.StatusOK {
 			t.Fatalf("discovery failed: expected 200, got %d", discoveryResp.StatusCode)
@@ -296,7 +297,7 @@ func TestPublicAPIStatusForbidden(t *testing.T) {
 	t.Run("Private API discovery still advertises status subresource", func(t *testing.T) {
 		// Verify discovery endpoint returns valid response
 		discoveryURL := privateURL + "/apis/test.orlop.gcp.managed.openshift.io/v1"
-		discoveryResp := httpDo(t, privClient, "GET", discoveryURL, nil)
+		discoveryResp := httpDo(t, privClient, http.MethodGet, discoveryURL, nil)
 
 		if discoveryResp.StatusCode != http.StatusOK {
 			t.Fatalf("discovery failed: expected 200, got %d", discoveryResp.StatusCode)
