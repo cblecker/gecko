@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 	publicv1 "github.com/openshift-online/gecko/platform-api/api/public/v1"
@@ -41,13 +43,17 @@ func getPublicResources() []types.ResourceInfo {
 // getPrivateScheme creates and returns a runtime.Scheme with private API types registered.
 func getPrivateScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
-	privatev1.AddToScheme(scheme)
+	if err := privatev1.AddToScheme(scheme); err != nil {
+		panic(fmt.Sprintf("failed to register private API types: %v", err))
+	}
 	return scheme
 }
 
 // getPublicScheme creates and returns a runtime.Scheme with public API types registered.
 func getPublicScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
-	publicv1.AddToScheme(scheme)
+	if err := publicv1.AddToScheme(scheme); err != nil {
+		panic(fmt.Sprintf("failed to register public API types: %v", err))
+	}
 	return scheme
 }

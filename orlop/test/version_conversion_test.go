@@ -37,7 +37,7 @@ func TestVersionConversion_CreateV1ReadV2(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -49,7 +49,7 @@ func TestVersionConversion_CreateV1ReadV2(t *testing.T) {
 	}
 
 	// Read the same object through the v2 endpoint
-	resp, body = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -78,7 +78,7 @@ func TestVersionConversion_CreateV1ReadV2(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 }
 
 func TestVersionConversion_CreateV2ReadV1(t *testing.T) {
@@ -102,7 +102,7 @@ func TestVersionConversion_CreateV2ReadV1(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v2APIPath, namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v2APIPath, namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -114,7 +114,7 @@ func TestVersionConversion_CreateV2ReadV1(t *testing.T) {
 	}
 
 	// Read through v1 endpoint
-	resp, body = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -132,7 +132,7 @@ func TestVersionConversion_CreateV2ReadV1(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 }
 
 func TestVersionConversion_ListV2(t *testing.T) {
@@ -158,14 +158,14 @@ func TestVersionConversion_ListV2(t *testing.T) {
 				},
 			},
 		}
-		resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), payload)
+		resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), payload)
 		if resp.StatusCode != http.StatusCreated {
 			t.Fatalf("Create %s: expected 201, got %d: %s", name, resp.StatusCode, body)
 		}
 	}
 
 	// List through v2
-	resp, body := doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects", v2APIPath, namespace), nil)
+	resp, body := doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects", v2APIPath, namespace), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -191,7 +191,7 @@ func TestVersionConversion_ListV2(t *testing.T) {
 
 	// Cleanup
 	for _, name := range []string{"list-a", "list-b"} {
-		doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+		doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 	}
 }
 
@@ -217,13 +217,13 @@ func TestVersionConversion_UpdateViaV2ReadV1(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Read via v2 to get resourceVersion
-	resp, body = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -251,7 +251,7 @@ func TestVersionConversion_UpdateViaV2ReadV1(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "PUT", fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), updatePayload)
+	resp, body = doRequest(t, http.MethodPut, fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), updatePayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -263,7 +263,7 @@ func TestVersionConversion_UpdateViaV2ReadV1(t *testing.T) {
 	}
 
 	// Read via v1 — should see the update
-	resp, body = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -280,7 +280,7 @@ func TestVersionConversion_UpdateViaV2ReadV1(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 }
 
 func TestVersionConversion_PatchViaV2(t *testing.T) {
@@ -305,7 +305,7 @@ func TestVersionConversion_PatchViaV2(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -329,7 +329,7 @@ func TestVersionConversion_PatchViaV2(t *testing.T) {
 	}
 
 	// Read via v1 — should see the patch
-	resp, body = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -342,7 +342,7 @@ func TestVersionConversion_PatchViaV2(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 }
 
 func TestVersionConversion_StatusViaV2(t *testing.T) {
@@ -369,7 +369,7 @@ func TestVersionConversion_StatusViaV2(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, body)
 	}
@@ -388,7 +388,7 @@ func TestVersionConversion_StatusViaV2(t *testing.T) {
 		},
 	}
 
-	resp, body = doRequest(t, "PUT", fmt.Sprintf("%s/namespaces/%s/objects/%s/status", v2APIPath, namespace, name), statusPayload)
+	resp, body = doRequest(t, http.MethodPut, fmt.Sprintf("%s/namespaces/%s/objects/%s/status", v2APIPath, namespace, name), statusPayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -400,7 +400,7 @@ func TestVersionConversion_StatusViaV2(t *testing.T) {
 	}
 
 	// Read status via v1
-	resp, body = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -414,7 +414,7 @@ func TestVersionConversion_StatusViaV2(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 }
 
 func TestVersionConversion_WatchV2(t *testing.T) {
@@ -425,7 +425,7 @@ func TestVersionConversion_WatchV2(t *testing.T) {
 	defer cancel()
 
 	watchURL := fmt.Sprintf("%s%s/namespaces/%s/objects?watch=true", baseURL, v2APIPath, namespace)
-	watchReq, err := http.NewRequestWithContext(ctx, "GET", watchURL, nil)
+	watchReq, err := http.NewRequestWithContext(ctx, http.MethodGet, watchURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to create watch request: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestVersionConversion_WatchV2(t *testing.T) {
 		},
 	}
 
-	doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
+	doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
 
 	// v2 watch should receive the event with v2 apiVersion
 	select {
@@ -509,7 +509,7 @@ func TestVersionConversion_WatchV2(t *testing.T) {
 	}
 
 	// Cleanup
-	doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, "conv-watch"), nil)
+	doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, "conv-watch"), nil)
 }
 
 func TestVersionConversion_DeleteViaV2(t *testing.T) {
@@ -534,26 +534,26 @@ func TestVersionConversion_DeleteViaV2(t *testing.T) {
 		},
 	}
 
-	resp, body := doRequest(t, "POST", fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
+	resp, body := doRequest(t, http.MethodPost, fmt.Sprintf("%s/namespaces/%s/objects", v1APIPath, namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Delete via v2
-	resp, body = doRequest(t, "DELETE", fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), nil)
+	resp, body = doRequest(t, http.MethodDelete, fmt.Sprintf("%s/namespaces/%s/objects/%s", v2APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
 
 	// Verify deleted via v1
-	resp, _ = doRequest(t, "GET", fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
+	resp, _ = doRequest(t, http.MethodGet, fmt.Sprintf("%s/namespaces/%s/objects/%s", v1APIPath, namespace, name), nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("Expected 404 after delete, got %d", resp.StatusCode)
 	}
 }
 
 func TestVersionConversion_DiscoveryV2(t *testing.T) {
-	resp, body := doRequest(t, "GET", v2APIPath, nil)
+	resp, body := doRequest(t, http.MethodGet, v2APIPath, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, body)
 	}
@@ -585,7 +585,7 @@ func doMergePatchRequest(t *testing.T, path string, body interface{}) (*http.Res
 	t.Helper()
 	jsonData, _ := json.Marshal(body)
 
-	req, err := http.NewRequest("PATCH", baseURL+path, bytes.NewReader(jsonData))
+	req, err := http.NewRequest(http.MethodPatch, baseURL+path, bytes.NewReader(jsonData))
 	if err != nil {
 		t.Fatal(err)
 	}

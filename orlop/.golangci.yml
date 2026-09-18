@@ -102,34 +102,11 @@ linters:
       - linters:
           - errcheck
         text: 'Error return value of `.*\.(Close|Rollback|Ping)` is not checked'
-      # AddToScheme only errors on duplicate type registrations, a programming
-      # error that surfaces immediately at startup.
-      - linters:
-          - errcheck
-        text: 'Error return value is not checked'
-        source: 'AddToScheme'
-      # Watch/bookmark helpers propagate errors through the watch stream itself.
-      - linters:
-          - errcheck
-        text: 'Error return value of `.*\.(sendBookmark|sendInitialBookmarkIfCaughtUp)` is not checked'
       # Tests routinely omit secondary error checks in helper functions where the
       # primary assertion is on the response status code.
       - linters:
           - errcheck
         path: '_test\.go$'
-
-      # ── errorlint ──────────────────────────────────────────────────────────
-      # Sentinel errors from stdlib (http, sql) and google/iterator are never
-      # wrapped by those packages, so == comparison is safe.
-      - linters:
-          - errorlint
-        text: 'comparing with .* will fail on wrapped errors'
-        source: '(http\.ErrServerClosed|sql\.ErrNoRows|iterator\.Done)'
-      # Existing %v usage in fmt.Errorf — migrating to %w is a separate effort.
-      - linters:
-          - errorlint
-        text: 'non-wrapping format verb for fmt\.Errorf'
-        path: '^(pkg/apiserver/handlers/patch|pkg/apiserver/storage/memory/broadcaster)\.go$'
 
       # ── gocyclo ───────────────────────────────────────────────────────────
       # Large integration / security tests have inherently high cyclomatic
@@ -175,13 +152,6 @@ linters:
           - unused
         text: 'func withLabels is unused'
         path: '^pkg/apiserver/storage/postgres/store_test\.go$'
-
-      # ── usestdlibvars ─────────────────────────────────────────────────────
-      # Existing test files use string HTTP method literals — migrating to
-      # http.MethodXxx constants is a separate cleanup effort.
-      - linters:
-          - usestdlibvars
-        path: '_test\.go$'
 
       # ── kubeapilinter ────────────────────────────────────────────────────
       # kubeapilinter only applies to Kubernetes API type definitions.

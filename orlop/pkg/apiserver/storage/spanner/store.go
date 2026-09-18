@@ -3,6 +3,7 @@ package spanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,7 +18,7 @@ import (
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -239,7 +240,7 @@ func (s *SpannerStore) Create(ctx context.Context, obj client.Object) error {
 				if useGenerateName && attempt < maxAttempts-1 {
 					continue
 				}
-				return errors.NewAlreadyExists(
+				return apierrors.NewAlreadyExists(
 					schema.GroupResource{Resource: s.resourceType},
 					name,
 				)
@@ -266,7 +267,7 @@ func (s *SpannerStore) Get(ctx context.Context, namespace, name string) (client.
 	)
 	if err != nil {
 		if spanner.ErrCode(err) == codes.NotFound {
-			return nil, errors.NewNotFound(
+			return nil, apierrors.NewNotFound(
 				schema.GroupResource{Resource: s.resourceType},
 				name,
 			)
@@ -301,7 +302,7 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 
 	if opts.Continue != "" {
 		if _, err := storage.DecodeContinueToken(opts.Continue); err != nil {
-			return nil, errors.NewResourceExpired("invalid continue token")
+			return nil, apierrors.NewResourceExpired("invalid continue token")
 		}
 	}
 
@@ -349,7 +350,7 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 
 	for {
 		row, err := iter.Next()
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
@@ -475,7 +476,7 @@ func (s *SpannerStore) Update(ctx context.Context, obj client.Object) error {
 		)
 		if readErr != nil {
 			if spanner.ErrCode(readErr) == codes.NotFound {
-				return errors.NewNotFound(schema.GroupResource{Resource: s.resourceType}, name)
+				return apierrors.NewNotFound(schema.GroupResource{Resource: s.resourceType}, name)
 			}
 			return readErr
 		}
@@ -485,7 +486,7 @@ func (s *SpannerStore) Update(ctx context.Context, obj client.Object) error {
 			return err
 		}
 		if expectedRV != 0 && storedRV != expectedRV {
-			return errors.NewConflict(schema.GroupResource{Resource: s.resourceType}, name,
+			return apierrors.NewConflict(schema.GroupResource{Resource: s.resourceType}, name,
 				fmt.Errorf("resource version %d does not match %d", expectedRV, storedRV))
 		}
 
@@ -531,7 +532,7 @@ func (s *SpannerStore) Delete(ctx context.Context, namespace, name string) error
 		)
 		if readErr != nil {
 			if spanner.ErrCode(readErr) == codes.NotFound {
-				return errors.NewNotFound(schema.GroupResource{Resource: s.resourceType}, name)
+				return apierrors.NewNotFound(schema.GroupResource{Resource: s.resourceType}, name)
 			}
 			return readErr
 		}

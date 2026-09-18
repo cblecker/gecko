@@ -16,7 +16,7 @@ func TestCORS(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "https://example.com")
-		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -34,7 +34,7 @@ func TestCORS(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "https://example.com")
-		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -52,7 +52,7 @@ func TestCORS(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "https://other.com")
-		req.Header.Set("Access-Control-Request-Method", "GET")
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)
@@ -68,7 +68,7 @@ func TestCORS(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodOptions, "/", nil)
 		req.Header.Set("Origin", "https://example.com")
-		req.Header.Set("Access-Control-Request-Method", "PATCH")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPatch)
 		rr := httptest.NewRecorder()
 
 		handler.ServeHTTP(rr, req)

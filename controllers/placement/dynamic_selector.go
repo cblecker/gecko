@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -45,7 +46,7 @@ func (r *realSMClient) listSecrets(ctx context.Context, parent, filter string) (
 	var secrets []*secretmanagerpb.Secret
 	for {
 		secret, err := it.Next()
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {

@@ -387,7 +387,7 @@ func TestServer_CRUD(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(obj)
-	resp, err := doRequest(client, "POST", baseURL+privatePath(), body)
+	resp, err := doRequest(client, http.MethodPost, baseURL+privatePath(), body)
 	if err != nil {
 		t.Fatalf("CREATE failed: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestServer_CRUD(t *testing.T) {
 	// UPDATE
 	fetched.Spec.PublicField = "updated-value"
 	updateBody, _ := json.Marshal(fetched)
-	resp, err = doRequest(client, "PUT", baseURL+privatePath()+"/aggregated-test", updateBody)
+	resp, err = doRequest(client, http.MethodPut, baseURL+privatePath()+"/aggregated-test", updateBody)
 	if err != nil {
 		t.Fatalf("UPDATE failed: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestServer_CRUD(t *testing.T) {
 	}
 
 	// DELETE
-	resp, err = doRequest(client, "DELETE", baseURL+privatePath()+"/aggregated-test", nil)
+	resp, err = doRequest(client, http.MethodDelete, baseURL+privatePath()+"/aggregated-test", nil)
 	if err != nil {
 		t.Fatalf("DELETE failed: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestServer_PublicAPIConversion(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(obj)
-	resp, err := doRequest(privateClient, "POST", privateBase+privatePath(), body)
+	resp, err := doRequest(privateClient, http.MethodPost, privateBase+privatePath(), body)
 	if err != nil {
 		t.Fatalf("CREATE via private API failed: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestServer_PublicAPI_SharedStore(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(obj)
-		resp, err := doRequest(privateClient, "POST", privateBase+privatePath(), body)
+		resp, err := doRequest(privateClient, http.MethodPost, privateBase+privatePath(), body)
 		if err != nil {
 			t.Fatalf("CREATE %d via private API failed: %v", i, err)
 		}

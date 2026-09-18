@@ -39,7 +39,7 @@ func TestParentFilterMiddleware(t *testing.T) {
 		r.Get("/", inner)
 	})
 
-	req := httptest.NewRequest("GET", "/parents/c1/children", nil)
+	req := httptest.NewRequest(http.MethodGet, "/parents/c1/children", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -71,7 +71,7 @@ func TestParentFilterMiddleware_DifferentParams(t *testing.T) {
 		r.Get("/", inner)
 	})
 
-	req := httptest.NewRequest("GET", "/clusters/my-cluster/nodepools", nil)
+	req := httptest.NewRequest(http.MethodGet, "/clusters/my-cluster/nodepools", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -171,7 +171,7 @@ func TestNestedRoute_CreateMatchingParent(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest("POST", "/namespaces/default/parents/p1/children", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/namespaces/default/parents/p1/children", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -191,7 +191,7 @@ func TestNestedRoute_CreateMismatchedParent(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest("POST", "/namespaces/default/parents/p1/children", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/namespaces/default/parents/p1/children", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -225,7 +225,7 @@ func TestNestedRoute_ListFiltersbyParent(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest("GET", "/namespaces/default/parents/p1/children", nil)
+	req := httptest.NewRequest(http.MethodGet, "/namespaces/default/parents/p1/children", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -263,7 +263,7 @@ func TestNestedRoute_GetWrongParent(t *testing.T) {
 		t.Fatalf("store.Create failed: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/namespaces/default/parents/p1/children/child1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/namespaces/default/parents/p1/children/child1", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -288,7 +288,7 @@ func TestNestedRoute_GetCorrectParent(t *testing.T) {
 		t.Fatalf("store.Create failed: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/namespaces/default/parents/p1/children/child1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/namespaces/default/parents/p1/children/child1", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -313,7 +313,7 @@ func TestNestedRoute_DeleteWrongParent(t *testing.T) {
 		t.Fatalf("store.Create failed: %v", err)
 	}
 
-	req := httptest.NewRequest("DELETE", "/namespaces/default/parents/p1/children/child1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/namespaces/default/parents/p1/children/child1", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 

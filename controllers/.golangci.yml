@@ -52,13 +52,6 @@ linters:
           - unparam
         text: 'makeNP - npID always receives "np-1"'
         path: '^nodepoolvrresolution/nodepoolvrresolution_controller_test\.go$'
-      # SecretIterator.Next returns iterator.Done directly; this sentinel is
-      # not wrapped by the Google client iterator.
-      - linters:
-          - errorlint
-        text: 'comparing with == will fail on wrapped errors'
-        path: '^placement/dynamic_selector\.go$'
-        source: 'err == iterator\.Done'
 
 severity:
   default: error

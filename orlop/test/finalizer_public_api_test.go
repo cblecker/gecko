@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,10 +27,14 @@ import (
 func TestFinalizerDeletionPublicAPI(t *testing.T) {
 	// Setup dedicated test server with public API enabled
 	privateScheme := runtime.NewScheme()
-	privatev1.AddToScheme(privateScheme)
+	if err := privatev1.AddToScheme(privateScheme); err != nil {
+		t.Fatalf("failed to register private API types: %v", err)
+	}
 
 	publicScheme := runtime.NewScheme()
-	publicv1.AddToScheme(publicScheme)
+	if err := publicv1.AddToScheme(publicScheme); err != nil {
+		t.Fatalf("failed to register public API types: %v", err)
+	}
 
 	privateResources := []apiserver.ResourceInfo{
 		{
@@ -92,7 +97,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 	// Start server
 	go func() {
-		if err := testServer.Run(); err != nil && err != http.ErrServerClosed {
+		if err := testServer.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Logf("Test server error: %v", err)
 		}
 	}()
@@ -263,7 +268,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		privateMetadata["finalizers"] = []string{"test.orlop.gcp.managed.openshift.io/my-finalizer"}
 
 		updateJSON, _ := json.Marshal(privateObj)
-		updateReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(updateJSON))
+		updateReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(updateJSON))
 		updateReq.Header.Set("Content-Type", "application/json")
 		updateResp, err := privateClient.Do(updateReq)
 		if err != nil {
@@ -325,7 +330,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		// Cleanup - remove finalizer via private API
 		privateMetadata2["finalizers"] = []string{}
 		cleanupJSON, _ := json.Marshal(privateObj2)
-		cleanupReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(cleanupJSON))
+		cleanupReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(cleanupJSON))
 		cleanupReq.Header.Set("Content-Type", "application/json")
 		cleanupResp, err := privateClient.Do(cleanupReq)
 		if err != nil {
@@ -372,7 +377,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 		// Delete object via public API
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -452,7 +457,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		}
 
 		updateJSON, _ := json.Marshal(privateObj)
-		updateReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(updateJSON))
+		updateReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(updateJSON))
 		updateReq.Header.Set("Content-Type", "application/json")
 		updateResp, err := privateClient.Do(updateReq)
 		if err != nil {
@@ -468,7 +473,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 		// Step 3: Delete object via public API (should set deletionTimestamp, NOT hard delete)
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -568,7 +573,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		}
 
 		addFinJSON, _ := json.Marshal(privateObj)
-		addFinReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(addFinJSON))
+		addFinReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(addFinJSON))
 		addFinReq.Header.Set("Content-Type", "application/json")
 		addFinResp, err := privateClient.Do(addFinReq)
 		if err != nil {
@@ -580,7 +585,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 		// Step 3: Soft delete via public API (set deletionTimestamp)
 		req, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -625,7 +630,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 		updateJSON, _ := json.Marshal(privateObj2)
 		updateReq, _ := http.NewRequest(
-			"PUT",
+			http.MethodPut,
 			privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(updateJSON),
 		)
@@ -704,7 +709,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		}
 
 		addFinJSON, _ := json.Marshal(privateObj)
-		addFinReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(addFinJSON))
+		addFinReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(addFinJSON))
 		addFinReq.Header.Set("Content-Type", "application/json")
 		addFinResp, err := privateClient.Do(addFinReq)
 		if err != nil {
@@ -716,7 +721,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 		// Step 3: First delete via public API — should soft-delete (set deletionTimestamp)
 		req1, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -739,7 +744,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 
 		// Step 4: Second delete (should still succeed but not change anything)
 		req2, _ := http.NewRequest(
-			"DELETE",
+			http.MethodDelete,
 			publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			nil,
 		)
@@ -815,7 +820,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		}
 
 		addFinJSON, _ := json.Marshal(privateObj)
-		addFinReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(addFinJSON))
+		addFinReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(addFinJSON))
 		addFinReq.Header.Set("Content-Type", "application/json")
 		addFinResp, err := privateClient.Do(addFinReq)
 		if err != nil {
@@ -826,7 +831,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		}
 
 		// Step 3: Soft delete via public API
-		delReq, _ := http.NewRequest("DELETE", publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, nil)
+		delReq, _ := http.NewRequest(http.MethodDelete, publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, nil)
 		delResp, err := publicClient.Do(delReq)
 		if err != nil {
 			t.Fatalf("HTTP request failed: %v", err)
@@ -843,7 +848,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		}
 		patchJSON, _ := json.Marshal(patchBody)
 		patchReq, _ := http.NewRequest(
-			"PATCH",
+			http.MethodPatch,
 			publicURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name,
 			bytes.NewBuffer(patchJSON),
 		)
@@ -878,7 +883,7 @@ func TestFinalizerDeletionPublicAPI(t *testing.T) {
 		// Step 6: Remove finalizers via private API — should trigger hard delete
 		privateMeta2["finalizers"] = []string{}
 		removeFinJSON, _ := json.Marshal(privateObj2)
-		removeFinReq, _ := http.NewRequest("PUT", privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(removeFinJSON))
+		removeFinReq, _ := http.NewRequest(http.MethodPut, privateURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/"+name, bytes.NewBuffer(removeFinJSON))
 		removeFinReq.Header.Set("Content-Type", "application/json")
 		removeFinResp, err := privateClient.Do(removeFinReq)
 		if err != nil {

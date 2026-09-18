@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -59,10 +60,14 @@ func ensureConversionTestServer(t *testing.T) {
 
 	// Create schemes
 	privateScheme := runtime.NewScheme()
-	privatev1.AddToScheme(privateScheme)
+	if err := privatev1.AddToScheme(privateScheme); err != nil {
+		t.Fatalf("failed to register private API types: %v", err)
+	}
 
 	publicScheme := runtime.NewScheme()
-	publicv1.AddToScheme(publicScheme)
+	if err := publicv1.AddToScheme(publicScheme); err != nil {
+		t.Fatalf("failed to register public API types: %v", err)
+	}
 
 	// Define resources
 	privateResources := []apiserver.ResourceInfo{
@@ -130,7 +135,7 @@ func ensureConversionTestServer(t *testing.T) {
 
 	// Start server in background
 	go func() {
-		if err := conversionTestServer.Run(); err != nil && err != http.ErrServerClosed {
+		if err := conversionTestServer.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Logf("Conversion test server error: %v", err)
 		}
 	}()
@@ -186,13 +191,13 @@ func TestConversion_CreatePrivateReadPublic(t *testing.T) {
 		},
 	}
 
-	resp, body := doConversionRequest(t, "POST", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doConversionRequest(t, http.MethodPost, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create via private API: %d: %s", resp.StatusCode, body)
 	}
 
 	// Read via PUBLIC API
-	resp, body = doConversionRequest(t, "GET", conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to read via public API: %d: %s", resp.StatusCode, body)
 	}
@@ -225,7 +230,7 @@ func TestConversion_CreatePrivateReadPublic(t *testing.T) {
 	}
 
 	// Cleanup
-	doConversionRequest(t, "DELETE", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doConversionRequest(t, http.MethodDelete, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestConversion_CreatePublicReadPrivate(t *testing.T) {
@@ -249,13 +254,13 @@ func TestConversion_CreatePublicReadPrivate(t *testing.T) {
 		},
 	}
 
-	resp, body := doConversionRequest(t, "POST", conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doConversionRequest(t, http.MethodPost, conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create via public API: %d: %s", resp.StatusCode, body)
 	}
 
 	// Read via PRIVATE API
-	resp, body = doConversionRequest(t, "GET", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to read via private API: %d: %s", resp.StatusCode, body)
 	}
@@ -281,7 +286,7 @@ func TestConversion_CreatePublicReadPrivate(t *testing.T) {
 	}
 
 	// Cleanup
-	doConversionRequest(t, "DELETE", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doConversionRequest(t, http.MethodDelete, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestConversion_ListFromBothAPIs(t *testing.T) {
@@ -305,7 +310,7 @@ func TestConversion_ListFromBothAPIs(t *testing.T) {
 			},
 		},
 	}
-	resp, body := doConversionRequest(t, "POST", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), privateObj)
+	resp, body := doConversionRequest(t, http.MethodPost, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), privateObj)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create via private API: %d: %s", resp.StatusCode, body)
 	}
@@ -325,13 +330,13 @@ func TestConversion_ListFromBothAPIs(t *testing.T) {
 			},
 		},
 	}
-	resp, body = doConversionRequest(t, "POST", conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), publicObj)
+	resp, body = doConversionRequest(t, http.MethodPost, conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), publicObj)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create via public API: %d: %s", resp.StatusCode, body)
 	}
 
 	// List via PRIVATE API
-	resp, body = doConversionRequest(t, "GET", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to list via private API: %d: %s", resp.StatusCode, body)
 	}
@@ -347,7 +352,7 @@ func TestConversion_ListFromBothAPIs(t *testing.T) {
 	}
 
 	// List via PUBLIC API
-	resp, body = doConversionRequest(t, "GET", conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to list via public API: %d: %s", resp.StatusCode, body)
 	}
@@ -377,8 +382,8 @@ func TestConversion_ListFromBothAPIs(t *testing.T) {
 	}
 
 	// Cleanup
-	doConversionRequest(t, "DELETE", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/list-test-private", namespace), nil)
-	doConversionRequest(t, "DELETE", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/list-test-public", namespace), nil)
+	doConversionRequest(t, http.MethodDelete, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/list-test-private", namespace), nil)
+	doConversionRequest(t, http.MethodDelete, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/list-test-public", namespace), nil)
 }
 
 func TestConversion_UpdateViaPublicPreservesInternal(t *testing.T) {
@@ -404,7 +409,7 @@ func TestConversion_UpdateViaPublicPreservesInternal(t *testing.T) {
 		},
 	}
 
-	resp, body := doConversionRequest(t, "POST", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doConversionRequest(t, http.MethodPost, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create: %d: %s", resp.StatusCode, body)
 	}
@@ -430,13 +435,13 @@ func TestConversion_UpdateViaPublicPreservesInternal(t *testing.T) {
 		},
 	}
 
-	resp, body = doConversionRequest(t, "PUT", conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
+	resp, body = doConversionRequest(t, http.MethodPut, conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), updatePayload)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to update via public API: %d: %s", resp.StatusCode, body)
 	}
 
 	// Read via PRIVATE API to verify internal fields were preserved
-	resp, body = doConversionRequest(t, "GET", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to read: %d: %s", resp.StatusCode, body)
 	}
@@ -465,7 +470,7 @@ func TestConversion_UpdateViaPublicPreservesInternal(t *testing.T) {
 	}
 
 	// Cleanup
-	doConversionRequest(t, "DELETE", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doConversionRequest(t, http.MethodDelete, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func TestConversion_FilterPrivateMetadata(t *testing.T) {
@@ -506,13 +511,13 @@ func TestConversion_FilterPrivateMetadata(t *testing.T) {
 		},
 	}
 
-	resp, body := doConversionRequest(t, "POST", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
+	resp, body := doConversionRequest(t, http.MethodPost, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects", namespace), createPayload)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create via private API: %d: %s", resp.StatusCode, body)
 	}
 
 	// Read via PUBLIC API
-	resp, body = doConversionRequest(t, "GET", conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPublicBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to read via public API: %d: %s", resp.StatusCode, body)
 	}
@@ -591,7 +596,7 @@ func TestConversion_FilterPrivateMetadata(t *testing.T) {
 	}
 
 	// Read via PRIVATE API to verify original data is preserved
-	resp, body = doConversionRequest(t, "GET", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	resp, body = doConversionRequest(t, http.MethodGet, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Failed to read via private API: %d: %s", resp.StatusCode, body)
 	}
@@ -622,7 +627,7 @@ func TestConversion_FilterPrivateMetadata(t *testing.T) {
 	}
 
 	// Cleanup
-	doConversionRequest(t, "DELETE", conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
+	doConversionRequest(t, http.MethodDelete, conversionPrivateBaseURL+fmt.Sprintf("/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/%s/objects/%s", namespace, name), nil)
 }
 
 func doConversionRequest(t *testing.T, method, url string, body interface{}) (*http.Response, string) {

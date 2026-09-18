@@ -193,7 +193,7 @@ func TestCascadeDeletionForeground(t *testing.T) {
 
 	// Delete parent with foreground propagation
 	req, _ := http.NewRequest(
-		"DELETE",
+		http.MethodDelete,
 		baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/parent-fg?propagationPolicy=Foreground",
 		nil,
 	)
@@ -321,7 +321,7 @@ func TestCascadeDeletionOrphan(t *testing.T) {
 
 	// Delete parent with orphan propagation
 	req, _ := http.NewRequest(
-		"DELETE",
+		http.MethodDelete,
 		baseURL+"/apis/test.orlop.gcp.managed.openshift.io/v1/namespaces/"+namespace+"/objects/parent-orphan?propagationPolicy=Orphan",
 		nil,
 	)

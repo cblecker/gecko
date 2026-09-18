@@ -17,8 +17,12 @@ var (
 
 func testScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
-	privatev1.AddToScheme(s)
-	privatev2.AddToScheme(s)
+	if err := privatev1.AddToScheme(s); err != nil {
+		panic(err)
+	}
+	if err := privatev2.AddToScheme(s); err != nil {
+		panic(err)
+	}
 	return s
 }
 

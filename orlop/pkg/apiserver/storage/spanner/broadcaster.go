@@ -3,6 +3,7 @@ package spanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -237,7 +238,7 @@ func (b *spannerBroadcaster) readChangeStream(ctx context.Context, partitionToke
 func (b *spannerBroadcaster) processChangeRecords(ctx context.Context, iter *spanner.RowIterator, lastTs *time.Time) (sawChildren bool, err error) {
 	for {
 		row, err := iter.Next()
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			return sawChildren, nil
 		}
 		if err != nil {
@@ -541,7 +542,7 @@ func (b *spannerBroadcaster) sendHistoricalEvents(outCh chan storage.ResourceEve
 	var lastRV int64
 	for {
 		row, err := iter.Next()
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
