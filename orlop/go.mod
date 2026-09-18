@@ -12,7 +12,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
-	golang.org/x/net v0.59.0
 	google.golang.org/api v0.298.0
 	google.golang.org/grpc v1.83.2
 	k8s.io/apiextensions-apiserver v0.37.0
@@ -78,7 +77,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/cel-go v0.31.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
-	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/google/s2a-go v0.1.10 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.22 // indirect
 	github.com/googleapis/gax-go/v2 v2.24.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.0 // indirect
@@ -124,6 +123,7 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
