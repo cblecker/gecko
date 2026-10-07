@@ -135,14 +135,23 @@ func newChannelSchemaProcessor(t *testing.T, schemaYAML string) *pkgschema.Proce
 }
 
 func TestChannelWithoutStatus(t *testing.T) {
-	object := channelAsMap(t, channelForSchemaTest())
-	delete(object, "status")
-	for _, schema := range []struct{ name, value string }{
-		{"private", privatev1.ChannelSchemaYAML},
-		{"public", publicv1.ChannelSchemaYAML},
+	for _, tc := range []struct {
+		name   string
+		object map[string]any
+		schema string
+	}{
+		{"private", channelAsMap(t, channelForSchemaTest()), privatev1.ChannelSchemaYAML},
+		{"public", channelAsMap(t, publicv1.Channel{
+			TypeMeta:   metav1.TypeMeta{APIVersion: publicv1.GroupVersion.String(), Kind: "Channel"},
+			ObjectMeta: metav1.ObjectMeta{Name: "nightly"},
+			Spec:       publicv1.ChannelSpec{InstallDefaultVersion: "4.22.14"},
+		}), publicv1.ChannelSchemaYAML},
 	} {
-		t.Run(schema.name, func(t *testing.T) {
-			if errs := newChannelSchemaProcessor(t, schema.value).Process(context.Background(), object); len(errs) != 0 {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, present := tc.object["status"]; present {
+				t.Fatal("Channel without observations serialized an empty status")
+			}
+			if errs := newChannelSchemaProcessor(t, tc.schema).Process(context.Background(), tc.object, nil); len(errs) != 0 {
 				t.Fatalf("Channel without status failed validation: %v", errs)
 			}
 		})
@@ -190,7 +199,7 @@ func TestChannelDefaultAvailabilityIsPrivate(t *testing.T) {
 				{"private", privatev1.ChannelSchemaYAML, channelAsMap(t, channel)},
 				{"public", publicv1.ChannelSchemaYAML, object},
 			} {
-				if errs := newChannelSchemaProcessor(t, schema.value).Process(context.Background(), schema.object); len(errs) != 0 {
+				if errs := newChannelSchemaProcessor(t, schema.value).Process(context.Background(), schema.object, nil); len(errs) != 0 {
 					t.Fatalf("%s Channel status failed validation: %v", schema.name, errs)
 				}
 			}
