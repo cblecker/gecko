@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// mockStatusWriter is unused by the controller but satisfies client.Client.
+// mockStatusWriter discards status; status persistence is covered by ci_sync_test.go.
 type mockStatusWriter struct{}
 
 func (m *mockStatusWriter) Update(_ context.Context, _ client.Object, _ ...client.SubResourceUpdateOption) error {
@@ -287,6 +287,7 @@ func TestChannelsAreReadFromChannelResources(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []privatev1.Channel{store.channels[1], store.channels[2], store.channels[0]}, channels)
+
 	assert.True(t, store.listedChannels)
 }
 
