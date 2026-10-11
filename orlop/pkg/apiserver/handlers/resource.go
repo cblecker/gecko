@@ -102,7 +102,7 @@ func (h *ResourceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process object (prune, default, validate)
-	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
+	if errs := h.processor.Process(r.Context(), objMap, nil); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
 		return
 	}
@@ -393,8 +393,21 @@ func (h *ResourceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert the existing object to the serving version once; it is reused
+	// both for building the CEL old-object map and for the CustomValidator call.
+	existingServing, err := h.convertToServingVersion(existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("converting old object to serving version: %v", err))
+		return
+	}
+	oldObjMap, err := toObjMap(existingServing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("building old-object map: %v", err))
+		return
+	}
+
 	// Process object (prune, default, validate)
-	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
+	if errs := h.processor.Process(r.Context(), objMap, oldObjMap); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
 		return
 	}
@@ -420,14 +433,7 @@ func (h *ResourceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if v, ok := obj.(types.CustomValidator); ok {
-		// Validators are written against the serving version, but the store
-		// returns the storage version. Convert for validation only; the raw
-		// existing object is what the generation comparison below works from.
-		existingServing, err := h.convertToServingVersion(existing)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("converting old object to serving version: %v", err))
-			return
-		}
+		// existingServing is already the serving version (computed above for CEL).
 		existingTyped, err := conversion.TypedOldObject(h.scheme, h.gvk, existingServing)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("converting old object: %v", err))
@@ -814,4 +820,18 @@ func (h *ResourceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(status)
+}
+
+// toObjMap marshals obj to JSON and unmarshals it into a map[string]interface{}.
+// It is used to produce the old-object map for CEL oldSelf validation.
+func toObjMap(obj interface{}) (map[string]interface{}, error) {
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling object: %w", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("unmarshaling object: %w", err)
+	}
+	return m, nil
 }

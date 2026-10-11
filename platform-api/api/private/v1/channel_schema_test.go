@@ -54,7 +54,7 @@ func TestChannelSchemaMinimumSupportedVersion(t *testing.T) {
 				t.Fatal(err)
 			}
 			processor := newChannelSchemaProcessor(t, privatev1.ChannelSchemaYAML)
-			errs := processor.Process(context.Background(), object)
+			errs := processor.Process(context.Background(), object, nil)
 			if tc.invalid {
 				if len(errs) == 0 {
 					t.Fatalf("expected minimum %q to fail schema validation", tc.minimum)

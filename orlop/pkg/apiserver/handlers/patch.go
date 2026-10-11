@@ -130,8 +130,21 @@ func (h *ResourceHandler) processPatchedObject(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Build an old-object map from the pre-patch state so that CEL rules
+	// referencing oldSelf work correctly.
+	existingJSON, err := json.Marshal(existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal existing object: %v", err))
+		return
+	}
+	var oldObjMap map[string]interface{}
+	if err := json.Unmarshal(existingJSON, &oldObjMap); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal old object: %v", err))
+		return
+	}
+
 	// Process object (prune, default, validate)
-	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
+	if errs := h.processor.Process(r.Context(), objMap, oldObjMap); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
 		return
 	}

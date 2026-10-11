@@ -129,7 +129,7 @@ func applyProcessingForComparison(ctx context.Context, processor *pkgschema.Proc
 	// Validation errors are irrelevant here: this copy exists only to build a
 	// comparable "old" value, and validation of the real request already
 	// happened on the incoming object.
-	processor.Process(ctx, m)
+	processor.Process(ctx, m, nil)
 	processedData, err := json.Marshal(m)
 	if err != nil {
 		return err

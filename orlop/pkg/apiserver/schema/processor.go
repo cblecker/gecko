@@ -43,8 +43,12 @@ func NewProcessor(structural *schema.Structural, props *apiext.JSONSchemaProps) 
 }
 
 // Process applies pruning, defaulting, and validation to an object.
-// The object should be a map[string]interface{} representing the JSON object.
-func (p *Processor) Process(ctx context.Context, obj interface{}) field.ErrorList {
+// obj should be a map[string]interface{} representing the JSON object.
+// oldObj should be the previously stored object as a map[string]interface{},
+// or nil when processing a create request. It is passed to the CEL validator
+// so that rules referencing oldSelf (e.g. immutability guards) work correctly
+// on updates.
+func (p *Processor) Process(ctx context.Context, obj, oldObj interface{}) field.ErrorList {
 	// 1. Prune unknown fields
 	pruning.Prune(obj, p.structural, true) // true = isResourceRoot
 
@@ -64,9 +68,13 @@ func (p *Processor) Process(ctx context.Context, obj interface{}) field.ErrorLis
 		}
 	}
 
-	// 4. Validate CEL rules (x-kubernetes-validations)
+	// 4. Validate CEL rules (x-kubernetes-validations).
+	// oldObj is nil on create. For rules without optionalOldSelf:true, the
+	// Kubernetes CEL library skips transition rules entirely when oldObj is
+	// nil, so immutability rules (e.g. self == oldSelf) do not fire on
+	// first creation.
 	if p.celValidator != nil {
-		celErrs, _ := p.celValidator.Validate(ctx, field.NewPath(""), p.structural, obj, nil, celconfig.RuntimeCELCostBudget)
+		celErrs, _ := p.celValidator.Validate(ctx, field.NewPath(""), p.structural, obj, oldObj, celconfig.RuntimeCELCostBudget)
 		errs = append(errs, celErrs...)
 	}
 

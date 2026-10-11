@@ -130,7 +130,7 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "schema processor not configured")
 		return
 	}
-	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
+	if errs := h.processor.Process(r.Context(), objMap, nil); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
 		return
 	}
@@ -519,6 +519,27 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 	// The public metadata schema prunes ownerReferences from input, so
 	// validateOwnerReferencesFromMap would always see an empty list.
 
+	// Build an old-object map using the public representation so that it
+	// matches the schema of objMap (which is the incoming public request).
+	// Set the GVK on the stored object first: stores may return unstructured
+	// objects without a GVK set, which would cause PrivateToPublic to fail.
+	existingPrivate.GetObjectKind().SetGroupVersionKind(h.gvk)
+	existingPublicForCEL, err := h.converter.PrivateToPublic(existingPrivate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert old object to public: %v", err))
+		return
+	}
+	existingJSONForCEL, err := json.Marshal(existingPublicForCEL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshaling old object: %v", err))
+		return
+	}
+	var oldObjMap map[string]interface{}
+	if err := json.Unmarshal(existingJSONForCEL, &oldObjMap); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("unmarshaling old object: %v", err))
+		return
+	}
+
 	// Process object (prune, default, validate) using public schema.
 	// Fail-closed: reject request if processor is nil (misconfiguration)
 	// rather than silently skipping all schema processing.
@@ -526,7 +547,7 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "schema processor not configured")
 		return
 	}
-	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
+	if errs := h.processor.Process(r.Context(), objMap, oldObjMap); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
 		return
 	}
@@ -650,6 +671,13 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(responsePublic)
 }
 
+// patchInput holds the outputs of the patch preparation step.
+type patchInput struct {
+	objMap          map[string]interface{}
+	oldObjMap       map[string]interface{}
+	existingPrivate client.Object
+}
+
 // Patch handles PATCH requests to partially update a resource.
 func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, constants.URLParamNamespace)
@@ -657,174 +685,27 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 	contentType := r.Header.Get(constants.HeaderContentType)
 	h.logger.V(1).Info("[PATCH-CONVERTING] %s namespace=%s name=%s content-type=%s", h.gvk.Kind, namespace, name, contentType)
 
-	// Get existing private object
-	existingPrivate, err := h.store.Get(r.Context(), namespace, name)
+	input, httpStatus, err := h.preparePatch(r, namespace, name)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, err.Error())
-		} else {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get object: %v", err))
-		}
+		writeError(w, httpStatus, err.Error())
 		return
 	}
 
-	if !validateParentOwnership(r.Context(), existingPrivate) {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-
-	// Convert to public for patching
-	existingPublic, err := h.converter.PrivateToPublic(existingPrivate)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to public: %v", err))
-		return
-	}
-
-	// Read patch body
-	patchBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("failed to read patch: %v", err))
-		return
-	}
-
-	// Status is controller-managed; strip from patch before applying.
-	// We strip from the patch itself (not from the merged result) to preserve
-	// existing controller-set status from existingPublic.
-	var patchMap map[string]interface{}
-	if err := json.Unmarshal(patchBytes, &patchMap); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid patch JSON: %v", err))
-		return
-	}
-	stripStatus(patchMap)
-	patchBytes, _ = json.Marshal(patchMap)
-
-	// Convert existing public object to JSON
-	existingJSON, err := json.Marshal(existingPublic)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to marshal existing object: %v", err))
-		return
-	}
-
-	// Apply merge patch (same logic as ResourceHandler)
-	patchedJSON, err := jsonMergePatch(existingJSON, patchBytes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("patch failed: %v", err))
-		return
-	}
-
-	// Convert to map for schema processing
-	var objMap map[string]interface{}
-	if err := json.Unmarshal(patchedJSON, &objMap); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal patched object: %v", err))
-		return
-	}
-
-	// Process object (prune, default, validate) using public schema.
-	// Fail-closed: reject request if processor is nil (misconfiguration)
-	// rather than silently skipping all schema processing.
 	if h.processor == nil {
 		writeError(w, http.StatusInternalServerError, "schema processor not configured")
 		return
 	}
-	if errs := h.processor.Process(r.Context(), objMap); len(errs) > 0 {
+	if errs := h.processor.Process(r.Context(), input.objMap, input.oldObjMap); len(errs) > 0 {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", errs.ToAggregate()))
 		return
 	}
 
-	// Convert to public typed object
-	objJSON, _ := json.Marshal(objMap)
-	publicObj, err := h.publicScheme.New(h.gvk)
+	privateObj, httpStatus, err := h.convertPatchToPrivate(r, namespace, name, input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create public object: %v", err))
-		return
-	}
-	if err := json.Unmarshal(objJSON, publicObj); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal object: %v", err))
+		writeError(w, httpStatus, err.Error())
 		return
 	}
 
-	// Set metadata
-	accessor, err := meta.Accessor(publicObj)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to access metadata: %v", err))
-		return
-	}
-
-	accessor.SetNamespace(namespace)
-	accessor.SetName(name)
-
-	if err := validateMetadata(accessor); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid metadata: %v", err))
-		return
-	}
-
-	// Convert public to private
-	privateObj, err := h.converter.PublicToPrivate(publicObj, existingPrivate)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to private: %v", err))
-		return
-	}
-
-	if d, ok := privateObj.(types.CustomDefaulter); ok {
-		if err := d.Default(r.Context()); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("defaulting failed: %v", err))
-			return
-		}
-	}
-
-	if v, ok := privateObj.(types.CustomValidator); ok {
-		existingTyped, err := conversion.TypedOldObject(h.privateScheme, h.gvk, existingPrivate)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("converting old object: %v", err))
-			return
-		}
-		if err := v.ValidateUpdate(r.Context(), existingTyped); err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
-			return
-		}
-	}
-
-	// Preserve deletionTimestamp from existing object.
-	// The converter's JSON unmarshal overwrites deletionTimestamp with nil
-	// since public API doesn't include it.
-	existingAccessor, err := meta.Accessor(existingPrivate)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to access existing metadata: %v", err))
-		return
-	}
-	privateAccessor, err := meta.Accessor(privateObj)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to access private metadata: %v", err))
-		return
-	}
-	if dt := existingAccessor.GetDeletionTimestamp(); dt != nil {
-		privateAccessor.SetDeletionTimestamp(dt)
-	}
-
-	// Check if spec changed and increment generation if so.
-	//
-	// Compare against a copy of existingPrivate normalized the same way as
-	// privateObj (custom defaulting), so identical content compares equal and
-	// generation does not churn. The copy is comparison-only; existingPrivate
-	// is never modified. Note: the public-schema prune/default applied to the
-	// incoming object is not mirrored here — doing so would require a
-	// public<->private round-trip. That asymmetry converges after one write and
-	// is tracked as a follow-up.
-	oldForCompare := existingForCompare(r.Context(), nil, existingPrivate, h.logger)
-	if specChanged(oldForCompare, privateObj) {
-		privateAccessor.SetGeneration(existingAccessor.GetGeneration() + 1)
-	} else {
-		privateAccessor.SetGeneration(existingAccessor.GetGeneration())
-	}
-
-	// Set GVK
-	privateObj.GetObjectKind().SetGroupVersionKind(h.gvk)
-
-	// Note: no finalizer-aware hard-delete here. Public API cannot modify finalizers
-	// (they are stripped by stripPrivateFieldsFromPublicInput), so finalizer removal
-	// only happens via the private API, which handles hard-delete in resource.go.
-
-	// Update object in storage (cast to client.Object)
 	if err := h.store.Update(r.Context(), privateObj.(client.Object)); err != nil {
 		h.logger.V(1).Info("[PATCH-CONVERTING] %s namespace=%s name=%s error=%v", h.gvk.Kind, namespace, name, err)
 		if errors.IsNotFound(err) {
@@ -839,7 +720,6 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 
 	h.logger.V(1).Info("[PATCH-CONVERTING] %s namespace=%s name=%s status=patched", h.gvk.Kind, namespace, name)
 
-	// Convert back to public for response
 	responsePublic, err := h.converter.PrivateToPublic(privateObj)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert response: %v", err))
@@ -849,6 +729,150 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(responsePublic)
+}
+
+// preparePatch fetches the existing object, applies the patch body to its
+// public representation, and returns the merged object map along with an old-
+// object map for CEL oldSelf validation.
+func (h *ConvertingResourceHandler) preparePatch(r *http.Request, namespace, name string) (patchInput, int, error) {
+	existingPrivate, err := h.store.Get(r.Context(), namespace, name)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return patchInput{}, http.StatusNotFound, err
+		}
+		return patchInput{}, http.StatusInternalServerError, fmt.Errorf("failed to get object: %w", err)
+	}
+
+	if !validateParentOwnership(r.Context(), existingPrivate) {
+		return patchInput{}, http.StatusNotFound, fmt.Errorf("not found")
+	}
+
+	existingPublic, err := h.converter.PrivateToPublic(existingPrivate)
+	if err != nil {
+		return patchInput{}, http.StatusInternalServerError, fmt.Errorf("failed to convert to public: %w", err)
+	}
+
+	patchBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		return patchInput{}, http.StatusBadRequest, fmt.Errorf("failed to read patch: %w", err)
+	}
+
+	// Status is controller-managed; strip from patch before applying so that
+	// existing controller-set status is preserved from existingPublic.
+	var patchMap map[string]interface{}
+	if err := json.Unmarshal(patchBytes, &patchMap); err != nil {
+		return patchInput{}, http.StatusBadRequest, fmt.Errorf("invalid patch JSON: %w", err)
+	}
+	stripStatus(patchMap)
+	patchBytes, _ = json.Marshal(patchMap)
+
+	existingJSON, err := json.Marshal(existingPublic)
+	if err != nil {
+		return patchInput{}, http.StatusInternalServerError, fmt.Errorf("failed to marshal existing object: %w", err)
+	}
+
+	patchedJSON, err := jsonMergePatch(existingJSON, patchBytes)
+	if err != nil {
+		return patchInput{}, http.StatusBadRequest, fmt.Errorf("patch failed: %w", err)
+	}
+
+	var objMap map[string]interface{}
+	if err := json.Unmarshal(patchedJSON, &objMap); err != nil {
+		return patchInput{}, http.StatusInternalServerError, fmt.Errorf("failed to unmarshal patched object: %w", err)
+	}
+
+	// Build an old-object map from the pre-patch state so that CEL rules
+	// referencing oldSelf work correctly on update.
+	var oldObjMap map[string]interface{}
+	if err := json.Unmarshal(existingJSON, &oldObjMap); err != nil {
+		return patchInput{}, http.StatusInternalServerError, fmt.Errorf("failed to unmarshal old object: %w", err)
+	}
+
+	return patchInput{
+		objMap:          objMap,
+		oldObjMap:       oldObjMap,
+		existingPrivate: existingPrivate,
+	}, http.StatusOK, nil
+}
+
+// convertPatchToPrivate converts the validated, merged public object map into
+// a private runtime.Object ready for storage, running custom defaulting and
+// validation, preserving server-managed metadata, and computing the new
+// generation.
+func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, namespace, name string, input patchInput) (runtime.Object, int, error) {
+	objJSON, _ := json.Marshal(input.objMap)
+	publicObj, err := h.publicScheme.New(h.gvk)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to create public object: %w", err)
+	}
+	if err := json.Unmarshal(objJSON, publicObj); err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to unmarshal object: %w", err)
+	}
+
+	accessor, err := meta.Accessor(publicObj)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to access metadata: %w", err)
+	}
+	accessor.SetNamespace(namespace)
+	accessor.SetName(name)
+
+	if err := validateMetadata(accessor); err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("invalid metadata: %w", err)
+	}
+
+	privateObj, err := h.converter.PublicToPrivate(publicObj, input.existingPrivate)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to convert to private: %w", err)
+	}
+
+	if d, ok := privateObj.(types.CustomDefaulter); ok {
+		if err := d.Default(r.Context()); err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("defaulting failed: %w", err)
+		}
+	}
+
+	if v, ok := privateObj.(types.CustomValidator); ok {
+		existingTyped, err := conversion.TypedOldObject(h.privateScheme, h.gvk, input.existingPrivate)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("converting old object: %w", err)
+		}
+		if err := v.ValidateUpdate(r.Context(), existingTyped); err != nil {
+			return nil, http.StatusBadRequest, fmt.Errorf("validation failed: %w", err)
+		}
+	}
+
+	// Preserve deletionTimestamp — the converter's JSON round-trip overwrites
+	// it with nil since the public API does not include it.
+	existingAccessor, err := meta.Accessor(input.existingPrivate)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to access existing metadata: %w", err)
+	}
+	privateAccessor, err := meta.Accessor(privateObj)
+	if err != nil {
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to access private metadata: %w", err)
+	}
+	if dt := existingAccessor.GetDeletionTimestamp(); dt != nil {
+		privateAccessor.SetDeletionTimestamp(dt)
+	}
+
+	// Increment generation when spec changes.
+	// Compare against a copy of existingPrivate normalized the same way as
+	// privateObj (custom defaulting), so identical content compares equal and
+	// generation does not churn. The copy is comparison-only; existingPrivate
+	// is never modified.
+	oldForCompare := existingForCompare(r.Context(), nil, input.existingPrivate, h.logger)
+	if specChanged(oldForCompare, privateObj) {
+		privateAccessor.SetGeneration(existingAccessor.GetGeneration() + 1)
+	} else {
+		privateAccessor.SetGeneration(existingAccessor.GetGeneration())
+	}
+
+	// Note: no finalizer-aware hard-delete here. The public API cannot modify
+	// finalizers (they are stripped by stripPrivateFieldsFromPublicInput), so
+	// finalizer removal only happens via the private API.
+	privateObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+
+	return privateObj, http.StatusOK, nil
 }
 
 // Delete handles DELETE requests to delete a resource.

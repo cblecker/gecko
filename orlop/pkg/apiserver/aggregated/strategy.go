@@ -110,7 +110,7 @@ func (s *ResourceStrategy) Validate(ctx context.Context, obj runtime.Object) fie
 		if err != nil {
 			return field.ErrorList{field.InternalError(field.NewPath(""), err)}
 		}
-		allErrs = append(allErrs, s.processor.Process(ctx, objMap)...)
+		allErrs = append(allErrs, s.processor.Process(ctx, objMap, nil)...)
 	}
 
 	allErrs = append(allErrs, validateOwnerReferences(obj)...)
@@ -216,7 +216,15 @@ func (s *ResourceStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.
 		if err != nil {
 			return field.ErrorList{field.InternalError(field.NewPath(""), err)}
 		}
-		allErrs = append(allErrs, s.processor.Process(ctx, objMap)...)
+		var oldMap interface{}
+		if old != nil {
+			m, err := toMap(old)
+			if err != nil {
+				return field.ErrorList{field.InternalError(field.NewPath(""), err)}
+			}
+			oldMap = m
+		}
+		allErrs = append(allErrs, s.processor.Process(ctx, objMap, oldMap)...)
 	}
 
 	allErrs = append(allErrs, validateOwnerReferences(obj)...)
@@ -245,7 +253,7 @@ func (s *ResourceStrategy) applyProcessing(ctx context.Context, obj runtime.Obje
 	}
 	// Process mutates objMap in place (pruning unknown fields, applying defaults).
 	// Validation errors are handled separately by Validate/ValidateUpdate.
-	s.processor.Process(ctx, objMap)
+	s.processor.Process(ctx, objMap, nil)
 	data, err := json.Marshal(objMap)
 	if err != nil {
 		return fmt.Errorf("marshaling processed object: %w", err)

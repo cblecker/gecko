@@ -18,7 +18,7 @@ func TestClusterSchemaAcceptsPrereleaseVersion(t *testing.T) {
 	processor := newClusterSchemaProcessor(t)
 	object := clusterAsMap(t, validCluster("5.0.0-ec.6"))
 
-	if errs := processor.Process(context.Background(), object); len(errs) > 0 {
+	if errs := processor.Process(context.Background(), object, nil); len(errs) > 0 {
 		t.Fatalf("expected prerelease cluster request to pass schema validation, got: %v", errs)
 	}
 }
@@ -27,7 +27,7 @@ func TestClusterSchemaRejectsInvalidReleaseVersions(t *testing.T) {
 	for _, version := range []string{"v5.0.0", "5.0.0-01"} {
 		t.Run(version, func(t *testing.T) {
 			processor := newClusterSchemaProcessor(t)
-			errs := processor.Process(context.Background(), clusterAsMap(t, validCluster(version)))
+			errs := processor.Process(context.Background(), clusterAsMap(t, validCluster(version)), nil)
 			if len(errs) == 0 {
 				t.Fatalf("expected version %q to fail schema validation", version)
 			}

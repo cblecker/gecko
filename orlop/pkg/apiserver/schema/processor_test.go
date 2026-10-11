@@ -116,7 +116,7 @@ properties:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errs := processor.Process(context.Background(), tt.obj)
+			errs := processor.Process(context.Background(), tt.obj, nil)
 			if tt.wantErr && len(errs) == 0 {
 				t.Fatal("expected validation error, got none")
 			}
@@ -197,7 +197,7 @@ properties:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errs := processor.Process(context.Background(), tt.obj)
+			errs := processor.Process(context.Background(), tt.obj, nil)
 			if tt.wantErr && len(errs) == 0 {
 				t.Fatal("expected validation error, got none")
 			}
@@ -238,7 +238,7 @@ properties:
 			"metadata":   map[string]any{},
 			"spec":       map[string]any{"name": "anything"},
 		}
-		if errs := processor.Process(context.Background(), obj); len(errs) > 0 {
+		if errs := processor.Process(context.Background(), obj, nil); len(errs) > 0 {
 			t.Fatalf("expected no errors, got: %v", errs)
 		}
 	})
@@ -250,7 +250,7 @@ properties:
 			"metadata":   map[string]any{},
 			"spec":       map[string]any{},
 		}
-		errs := processor.Process(context.Background(), obj)
+		errs := processor.Process(context.Background(), obj, nil)
 		if len(errs) == 0 {
 			t.Fatal("expected validation error for missing required field, got none")
 		}
@@ -300,7 +300,7 @@ properties:
 				"metadata":   map[string]any{},
 				"spec":       map[string]any{"port": tt.port},
 			}
-			errs := processor.Process(context.Background(), obj)
+			errs := processor.Process(context.Background(), obj, nil)
 			if tt.wantErr && len(errs) == 0 {
 				t.Fatal("expected validation error, got none")
 			}
@@ -373,7 +373,7 @@ properties:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errs := processor.Process(context.Background(), tt.obj)
+			errs := processor.Process(context.Background(), tt.obj, nil)
 			if tt.wantErr && len(errs) == 0 {
 				t.Fatal("expected validation error, got none")
 			}
@@ -392,5 +392,165 @@ func assertErrorContains(t *testing.T, errs field.ErrorList, msg string) {
 	}
 	if !strings.Contains(aggregate.Error(), msg) {
 		t.Errorf("expected error containing %q, got: %v", msg, aggregate)
+	}
+}
+
+// TestProcess_OldSelf verifies that CEL rules referencing oldSelf work
+// correctly for both create and update paths. A nil oldObj on create causes
+// the Kubernetes CEL library to skip transition rules (without optionalOldSelf:true),
+// so immutability rules always pass on first creation. On update, oldObj is
+// the previous state and the rule fires when the field changes.
+func TestProcess_OldSelf_Immutability(t *testing.T) {
+	const schemaYAML = `
+type: object
+properties:
+  apiVersion:
+    type: string
+  kind:
+    type: string
+  metadata:
+    type: object
+  spec:
+    type: object
+    properties:
+      clusterID:
+        type: string
+        x-kubernetes-validations:
+          - rule: "self == oldSelf"
+            message: "clusterID is immutable"
+    required:
+      - clusterID
+`
+	processor := newProcessor(t, schemaYAML)
+
+	obj := func(id string) map[string]any {
+		return map[string]any{
+			"apiVersion": "example.com/v1",
+			"kind":       "MyResource",
+			"metadata":   map[string]any{},
+			"spec":       map[string]any{"clusterID": id},
+		}
+	}
+
+	t.Run("create with nil oldObj passes (transition rule skipped)", func(t *testing.T) {
+		if errs := processor.Process(context.Background(), obj("cluster-1"), nil); len(errs) > 0 {
+			t.Fatalf("expected no error on create, got: %v", errs)
+		}
+	})
+
+	t.Run("update with same value passes", func(t *testing.T) {
+		if errs := processor.Process(context.Background(), obj("cluster-1"), obj("cluster-1")); len(errs) > 0 {
+			t.Fatalf("expected no error when value unchanged, got: %v", errs)
+		}
+	})
+
+	t.Run("update with changed value is rejected", func(t *testing.T) {
+		errs := processor.Process(context.Background(), obj("cluster-2"), obj("cluster-1"))
+		if len(errs) == 0 {
+			t.Fatal("expected immutability error when clusterID changes, got none")
+		}
+		assertErrorContains(t, errs, "clusterID is immutable")
+	})
+}
+
+// TestProcess_OldSelf_OnceSettable verifies the "set once" pattern:
+// the field may be set when it was previously empty, but may not change
+// once it has a value.
+func TestProcess_OldSelf_OnceSettable(t *testing.T) {
+	const schemaYAML = `
+type: object
+properties:
+  apiVersion:
+    type: string
+  kind:
+    type: string
+  metadata:
+    type: object
+  spec:
+    type: object
+    properties:
+      infraID:
+        type: string
+        x-kubernetes-validations:
+          - rule: "oldSelf == '' || self == oldSelf"
+            message: "infraID is immutable once set"
+    required:
+      - infraID
+`
+	processor := newProcessor(t, schemaYAML)
+
+	obj := func(id string) map[string]any {
+		return map[string]any{
+			"apiVersion": "example.com/v1",
+			"kind":       "MyResource",
+			"metadata":   map[string]any{},
+			"spec":       map[string]any{"infraID": id},
+		}
+	}
+
+	t.Run("create with nil oldObj passes", func(t *testing.T) {
+		if errs := processor.Process(context.Background(), obj("infra-abc"), nil); len(errs) > 0 {
+			t.Fatalf("expected no error on create, got: %v", errs)
+		}
+	})
+
+	t.Run("setting value when old was empty passes", func(t *testing.T) {
+		if errs := processor.Process(context.Background(), obj("infra-abc"), obj("")); len(errs) > 0 {
+			t.Fatalf("expected no error when setting from empty, got: %v", errs)
+		}
+	})
+
+	t.Run("keeping existing value passes", func(t *testing.T) {
+		if errs := processor.Process(context.Background(), obj("infra-abc"), obj("infra-abc")); len(errs) > 0 {
+			t.Fatalf("expected no error when value unchanged, got: %v", errs)
+		}
+	})
+
+	t.Run("changing existing value is rejected", func(t *testing.T) {
+		errs := processor.Process(context.Background(), obj("infra-xyz"), obj("infra-abc"))
+		if len(errs) == 0 {
+			t.Fatal("expected error when infraID changes after being set, got none")
+		}
+		assertErrorContains(t, errs, "infraID is immutable once set")
+	})
+}
+
+// TestProcess_OldSelf_NilOldObjDoesNotFireImmutability verifies that passing
+// nil as oldObj on create does not cause immutability rules to fire. For rules
+// without optionalOldSelf:true, the Kubernetes CEL library skips transition
+// rules entirely when oldObj is nil, so create always passes.
+func TestProcess_OldSelf_NilOldObjDoesNotFireImmutabilityOnCreate(t *testing.T) {
+	const schemaYAML = `
+type: object
+properties:
+  apiVersion:
+    type: string
+  kind:
+    type: string
+  metadata:
+    type: object
+  spec:
+    type: object
+    properties:
+      region:
+        type: string
+        x-kubernetes-validations:
+          - rule: "self == oldSelf"
+            message: "region is immutable"
+    required:
+      - region
+`
+	processor := newProcessor(t, schemaYAML)
+
+	// This must not return an error: on create there is no old object, and
+	// the Kubernetes CEL library skips transition rules when oldObj is nil.
+	obj := map[string]any{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyResource",
+		"metadata":   map[string]any{},
+		"spec":       map[string]any{"region": "us-central1"},
+	}
+	if errs := processor.Process(context.Background(), obj, nil); len(errs) > 0 {
+		t.Fatalf("immutability rule must not fire on create (nil oldObj), got: %v", errs)
 	}
 }

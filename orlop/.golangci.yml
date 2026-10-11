@@ -124,6 +124,7 @@ linters:
         text: 'cyclomatic complexity 31 of func `\(\*SpannerStore\)\.List` is high'
         path: '^pkg/apiserver/storage/spanner/store\.go$'
 
+
       # ── noctx ─────────────────────────────────────────────────────────────
       # Tests spin up short-lived in-memory servers; context-free API calls are
       # acceptable within bounded test lifetimes.
