@@ -108,17 +108,16 @@ func parseRequestPath(rawPath string) (parsedRequest, error) {
 		i++
 	}
 
-	// NodePools also have a nested parent route:
-	// /namespaces/{namespace}/clusters/{clusterID}/nodepools.
+	// Cluster children also have nested parent routes:
+	// /namespaces/{namespace}/clusters/{clusterID}/{childResource}.
 	if result.plural == "clusters" && i < len(parts) {
 		i++ // parent cluster name
-		if i >= len(parts) || parts[i] != "nodepools" {
-			if i == len(parts) {
-				return parsedRequest{namespace: result.namespace, plural: result.plural, named: true}, nil
-			}
-			return parsedRequest{}, fmt.Errorf("invalid cluster child path")
+		if i == len(parts) {
+			return parsedRequest{namespace: result.namespace, plural: result.plural, named: true}, nil
 		}
-		result.plural = "nodepools"
+		// Authorization checks the child action; the router checks whether this
+		// resource actually has a nested Cluster route.
+		result.plural = parts[i]
 		i++
 	}
 
