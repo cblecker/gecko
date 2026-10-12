@@ -411,14 +411,16 @@ type ReleaseSpec struct {
 	// +example="4.14.9"
 	Version string `json:"version"`
 
-	// channelGroup is the Cincinnati channel group used to resolve the release image.
-	// Valid values are "stable", "fast", and "candidate".
+	// channelGroup selects a platform-managed Channel used to choose and resolve
+	// the release (for example, stable, fast, eus, candidate, or nightly).
+	// Available Channels depend on the environment; channel groups must be
+	// lowercase DNS labels (not arbitrary DNS subdomain Channel names).
 	//
 	// +orlop:public
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Enum=stable;fast;candidate
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	ChannelGroup string `json:"channelGroup"`
 }
 
@@ -562,7 +564,7 @@ type VersionResolutionResult struct {
 	// Derived from ChannelGroup and the major.minor of ReleaseVersion.
 	// +optional
 	CincinnatiChannel string `json:"cincinnatiChannel,omitempty"`
-	// ChannelGroup is the raw channel group from spec.release.channelGroup (e.g. "stable", "candidate", "fast").
+	// ChannelGroup is the raw channel group from spec.release.channelGroup (e.g. "stable", "nightly").
 	// Stored to detect channel group changes without reconstructing the Cincinnati channel string.
 	// +optional
 	ChannelGroup string `json:"channelGroup,omitempty"`
