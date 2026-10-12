@@ -92,8 +92,8 @@ DiskSizeGB int32 `json:"diskSizeGB,omitempty"`
 ```
 
 **Public field doc-strings are customer-facing documentation.** Comments on fields
-marked `+orlop:public` are extracted verbatim into the generated OpenAPI schema and
-surface in public API reference documentation. Therefore:
+documentation for fields marked `+orlop:public` is used as the description in the
+generated OpenAPI schema and surfaces in public API reference documentation. Therefore:
 
 - MUST describe the field from a customer's perspective.
 - MUST NOT contain internal implementation details, management-cluster names, RH-internal
