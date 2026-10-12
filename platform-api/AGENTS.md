@@ -4,31 +4,26 @@ This file applies to the `platform-api/` subtree and supplements the repository
 root `AGENTS.md`. Follow the root guide for shared workflow, commands, and final
 validation, and `../TESTING.md` for repository-wide testing conventions.
 
+**API design rules** (field types, validation, immutability, backward
+compatibility, etc.) are in [`API-CONVENTIONS.md`](API-CONVENTIONS.md).
+This file covers workflow, architecture, and review procedure only.
+
 ## Platform API and generated code
 
 The private API types under `api/private/<version>/` are the source of truth.
-The public API surface is derived from them.
+The public API surface is derived from them and MUST NOT be edited by hand
+(this includes `api/public/`, `zz_generated.*`, and generated `.schemas/*.yaml`
+files).
 
-- Never manually edit `api/public/`, `zz_generated.*`, or generated
-  `.schemas/*.yaml` files.
-- Add `+orlop:public` to every type or field that belongs in the customer-facing
-  API. Anything without that marker remains private.
-- Use Kubebuilder markers for validation, list semantics, resource scope, print
-  columns, and status subresources. Prefer schema validation to duplicated basic
-  validation in handlers or controllers.
-- Register each new root resource and list type in the private API package's
-  `init()` function.
-- After changing private types or markers, run
-  `make -C platform-api generate` from the repository root, or `make generate`
-  when already inside `platform-api/`. Generation may update public types,
-  conversions, deep-copy methods, and OpenAPI schemas for existing resources;
-  review the complete generated diff.
-- Run generation a second time when validating generator changes. If the second
-  pass changes files, investigate nondeterminism before considering the work
-  complete.
-- Treat the published public API as a compatibility contract. Prefer additive
-  changes. Do not rename or remove public fields, resources, or behavior without
-  an explicit versioning or migration decision.
+After changing private types or markers, run:
+
+```bash
+make -C platform-api generate   # from repo root
+# or
+make generate                   # from inside platform-api/
+```
+
+Run generation twice and verify the second pass produces no changes.
 
 ## API design checklist
 
@@ -42,7 +37,6 @@ Before adding or changing an API resource, consider:
 - If nested, what is its parent relationship and relationship field, and what
   happens when the referenced parent does not exist?
 - Is the change additive and backward compatible?
-- Can validation be expressed through Kubebuilder/OpenAPI schema validation?
 
 ## Adding a new API resource
 
@@ -81,12 +75,6 @@ and normal `kubectl` access on the applicable surface.
   Cluster children such as `NodePool` use `spec.clusterID`.
 - Keep the parent relationship values consistent across the private and public
   registrations. Test both direct and nested routes when changing this code.
-
-### Status ownership
-
-Keep desired configuration in `spec` and asynchronously observed state in
-`status`. Conditions should have one clear owner; do not report the same
-lifecycle independently on parent and child resources.
 
 ## Testing and review
 
