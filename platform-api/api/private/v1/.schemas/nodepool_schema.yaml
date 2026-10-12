@@ -239,14 +239,13 @@ properties:
         properties:
           channelGroup:
             description: |-
-              channelGroup is the Cincinnati channel group used to resolve the release image.
-              Valid values are "stable", "fast", and "candidate".
-            enum:
-            - stable
-            - fast
-            - candidate
+              channelGroup selects a platform-managed Channel used to choose and resolve
+              the release (for example, stable, fast, eus, candidate, or nightly).
+              Available Channels depend on the environment; channel groups must be
+              lowercase DNS labels (not arbitrary DNS subdomain Channel names).
             maxLength: 63
             minLength: 1
+            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
             type: string
           version:
             description: |-
@@ -391,7 +390,7 @@ properties:
         properties:
           channelGroup:
             description: |-
-              ChannelGroup is the raw channel group from spec.release.channelGroup (e.g. "stable", "candidate", "fast").
+              ChannelGroup is the raw channel group from spec.release.channelGroup (e.g. "stable", "nightly").
               Stored to detect channel group changes without reconstructing the Cincinnati channel string.
             type: string
           cincinnatiChannel:

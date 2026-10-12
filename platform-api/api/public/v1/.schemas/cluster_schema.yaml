@@ -307,12 +307,9 @@ properties:
           The version-resolution adapter resolves Version+ChannelGroup to a release image pullspec.
         properties:
           channelGroup:
-            enum:
-            - stable
-            - fast
-            - candidate
             maxLength: 63
             minLength: 1
+            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
             type: string
           version:
             maxLength: 63
