@@ -44,6 +44,10 @@ spec:
             {{- end }}
             - --log-level={{ .Values.logLevel }}
             - --log-format={{ .Values.logFormat }}
+            - --source-type={{ .Values.source.type }}
+            {{- if .Values.source.url }}
+            - --source-url={{ .Values.source.url }}
+            {{- end }}
             - --cincinnati-url={{ .Values.cincinnati.url }}
             - --arch={{ .Values.cincinnati.arch }}
           resources:

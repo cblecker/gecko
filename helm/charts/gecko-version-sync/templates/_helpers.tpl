@@ -61,6 +61,12 @@ Create the name of the service account to use
 Validate required values.
 */}}
 {{- define "gecko-version-sync.validateValues" -}}
+{{- if not (has .Values.source.type (list "cincinnati" "release-controller")) -}}
+{{- fail "source.type must be cincinnati or release-controller" -}}
+{{- end -}}
+{{- if and (eq .Values.source.type "release-controller") (not .Values.source.url) -}}
+{{- fail "source.url is required for release-controller" -}}
+{{- end -}}
 {{- $registry := trim (toString .Values.image.registry) -}}
 {{- if or (not $registry) (eq $registry "CHANGE_ME") -}}
 {{- fail "image.registry must be set (e.g. --set image.registry=us-docker.pkg.dev)" -}}
