@@ -8,9 +8,12 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 	"github.com/openshift-online/gecko/platform-api/pkg/authn"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -139,6 +142,84 @@ func TestMiddlewareFailsClosedWithoutAuthorizer(t *testing.T) {
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
 	}
+}
+
+func TestMiddlewareDefersObjectAuthorizationToHandler(t *testing.T) {
+	stores, authorizer := newTestAuthorizer(t)
+	condition := `context.spec.region == "us-east1"`
+	seedClusterGetBinding(t, stores, "project-a", &condition)
+	if err := authorizer.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	resources := []types.ResourceInfo{{
+		GVK:        runtimeschema.GroupVersionKind{Group: "gcp.managed.openshift.io", Version: "v1", Kind: "Cluster"},
+		Plural:     "clusters",
+		Namespaced: true,
+	}}
+	ctx := authn.WithUser(context.Background(), "alice@example.com")
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/apis/gcp.managed.openshift.io/v1/namespaces/project-a/clusters/east", nil)
+	response := httptest.NewRecorder()
+	Middleware(authorizer, logr.Discard(), resources)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		objectAuthorizer, ok := handlers.ObjectAuthorizerFromContext(r.Context())
+		if !ok {
+			t.Fatal("object authorizer was not added to the request context")
+		}
+		allowed, err := objectAuthorizer(r.Context(), authorizationTestObject("east", "us-east1"))
+		if err != nil || !allowed {
+			t.Fatalf("allowed object authorization = %t, %v; want allowed", allowed, err)
+		}
+		allowed, err = objectAuthorizer(r.Context(), authorizationTestObject("east", "us-west1"))
+		if err != nil || allowed {
+			t.Fatalf("denied object authorization = %t, %v; want denied", allowed, err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
+func seedClusterGetBinding(t *testing.T, stores Stores, namespace string, condition *string) {
+	t.Helper()
+	seedClusterBinding(t, stores, namespace, []string{"cluster.get"}, condition)
+}
+
+func seedClusterBinding(t *testing.T, stores Stores, namespace string, permissions []string, condition *string) {
+	t.Helper()
+	role := &privatev1.PlatformRole{Spec: privatev1.PlatformRoleSpec{Permissions: permissions}}
+	role.Name = "cluster-viewer"
+	role.SetGroupVersionKind(privatev1.GroupVersion.WithKind("PlatformRole"))
+	if err := stores.PlatformRoles.Create(context.Background(), role); err != nil {
+		t.Fatal(err)
+	}
+	binding := &privatev1.RoleBinding{
+		Spec: privatev1.RoleBindingSpec{
+			Subject:   "alice@example.com",
+			RoleRef:   privatev1.RoleRef{Kind: "PlatformRole", Name: "cluster-viewer", APIGroup: privatev1.GroupVersion.Group},
+			Condition: condition,
+		},
+	}
+	binding.Name = "alice-viewer"
+	binding.Namespace = namespace
+	binding.SetGroupVersionKind(privatev1.GroupVersion.WithKind("RoleBinding"))
+	if err := stores.RoleBindings.Create(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func authorizationTestObject(name, region string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "gcp.managed.openshift.io/v1",
+		"kind":       "Cluster",
+		"metadata": map[string]interface{}{
+			"namespace": "project-a",
+			"name":      name,
+		},
+		"spec": map[string]interface{}{
+			"region": region,
+		},
+	}}
 }
 
 func TestParseClusterChildRequestPath(t *testing.T) {

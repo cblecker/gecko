@@ -1,6 +1,7 @@
 package authz
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"path"
@@ -8,22 +9,26 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
 	"github.com/openshift-online/gecko/platform-api/pkg/authn"
 	"github.com/openshift-online/gecko/platform-api/pkg/publicaccess"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Middleware enforces Cedar authorization for the public CRUD API. The
-// object-state-aware and per-item list phases are not part of this foundation;
-// it authorizes namespace-scoped operations and fails closed for
-// cross-namespace collection requests.
-func Middleware(authorizer *Authorizer, logger logr.Logger, authorizationExemptResources []types.ResourceInfo) func(http.Handler) http.Handler {
+// Middleware enforces Cedar authorization for public CRUD API requests.
+func Middleware(authorizer *Authorizer, logger logr.Logger, resources []types.ResourceInfo) func(http.Handler) http.Handler {
 	if logger.GetSink() == nil {
 		logger = logr.Discard()
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isMetadataPath(r.URL.Path) || publicaccess.IsAuthorizationExemptRequest(r, authorizationExemptResources) {
+			if isMetadataPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if publicaccess.IsAuthorizationExemptRequest(r, resources) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -46,8 +51,8 @@ func Middleware(authorizer *Authorizer, logger logr.Logger, authorizationExemptR
 				return
 			}
 			if requestInfo.namespace == "" {
-				// Cross-namespace filtering is not implemented in this
-				// foundation. Do not return all namespaces while it is absent.
+				// Do not return resources across namespaces without an explicit
+				// namespace authorization strategy.
 				writeForbidden(w)
 				return
 			}
@@ -58,18 +63,24 @@ func Middleware(authorizer *Authorizer, logger logr.Logger, authorizationExemptR
 				writeForbidden(w)
 				return
 			}
-			allowed, err := authorizer.Authorize(r.Context(), email, action, requestInfo.namespace)
-			if err != nil {
-				logger.Error(err, "authorization evaluation failed closed", "method", r.Method, "resource", requestInfo.plural, "namespace", requestInfo.namespace)
-				writeForbidden(w)
-				return
-			}
-			if !allowed {
-				writeForbidden(w)
+			if r.Method == http.MethodGet && !requestInfo.named {
+				allowed, err := authorizer.Authorize(r.Context(), email, action, requestInfo.namespace)
+				if err != nil {
+					logger.Error(err, "authorization evaluation failed closed", "method", r.Method, "resource", requestInfo.plural, "namespace", requestInfo.namespace)
+					writeForbidden(w)
+					return
+				}
+				if !allowed {
+					writeForbidden(w)
+					return
+				}
+				next.ServeHTTP(w, r)
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			objectAuthorizer := objectAuthorizer(authorizer, logger, email, action, requestInfo, r.Method)
+			ctx := handlers.WithObjectAuthorizer(r.Context(), objectAuthorizer)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
@@ -113,7 +124,8 @@ func parseRequestPath(rawPath string) (parsedRequest, error) {
 	if result.plural == "clusters" && i < len(parts) {
 		i++ // parent cluster name
 		if i == len(parts) {
-			return parsedRequest{namespace: result.namespace, plural: result.plural, named: true}, nil
+			result.named = true
+			return result, nil
 		}
 		// Authorization checks the child action; the router checks whether this
 		// resource actually has a nested Cluster route.
@@ -135,6 +147,24 @@ func parseRequestPath(rawPath string) (parsedRequest, error) {
 		return parsedRequest{}, fmt.Errorf("cluster-wide named resources are not public")
 	}
 	return result, nil
+}
+
+func objectAuthorizer(authorizer *Authorizer, logger logr.Logger, email string, action Action, request parsedRequest, method string) handlers.ObjectAuthorizer {
+	return func(ctx context.Context, object client.Object) (bool, error) {
+		if object == nil || object.GetNamespace() != request.namespace {
+			return false, fmt.Errorf("authorization object namespace does not match request")
+		}
+		requestContext, err := CedarContextForObject(object, request.plural, method)
+		if err != nil {
+			return false, err
+		}
+		allowed, err := authorizer.AuthorizeWithContext(ctx, email, action, request.namespace, requestContext)
+		if err != nil {
+			logger.Error(err, "authorization evaluation failed closed", "resource", request.plural, "namespace", request.namespace)
+			return false, err
+		}
+		return allowed, nil
+	}
 }
 
 func isMetadataPath(requestPath string) bool {

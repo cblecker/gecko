@@ -371,6 +371,48 @@ func TestAuthenticatedUserContext(t *testing.T) {
 	}
 }
 
+func TestConvertingResourceHandlerGetAuthorizesAfterLookup(t *testing.T) {
+	handler, store := setupConvertingHandlerTest(t)
+
+	requestFor := func(name string, authorizer ObjectAuthorizer) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/apis/test.io/v1/namespaces/default/testobjects/"+name, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add(constants.URLParamNamespace, "default")
+		rctx.URLParams.Add(constants.URLParamName, name)
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		return req.WithContext(WithObjectAuthorizer(ctx, authorizer))
+	}
+
+	called := 0
+	missingRecorder := httptest.NewRecorder()
+	handler.Get(missingRecorder, requestFor("missing", func(context.Context, client.Object) (bool, error) {
+		called++
+		return false, nil
+	}))
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("missing object status = %d, want %d", missingRecorder.Code, http.StatusNotFound)
+	}
+	if called != 0 {
+		t.Fatalf("object authorizer calls = %d, want 0 for a missing object", called)
+	}
+
+	object := createTestObject("denied", "default", nil)
+	if err := store.Create(context.Background(), object); err != nil {
+		t.Fatal(err)
+	}
+	deniedRecorder := httptest.NewRecorder()
+	handler.Get(deniedRecorder, requestFor("denied", func(context.Context, client.Object) (bool, error) {
+		called++
+		return false, nil
+	}))
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("denied object status = %d, want %d", deniedRecorder.Code, http.StatusForbidden)
+	}
+	if called != 1 {
+		t.Fatalf("object authorizer calls = %d, want 1", called)
+	}
+}
+
 func TestConvertingResourceHandlerCreateRejectsMissingOrDeletingParent(t *testing.T) {
 	handler, store := setupConvertingHandlerTest(t)
 	handler.SetParentStore(store, "spec.field")

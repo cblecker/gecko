@@ -264,6 +264,9 @@ func (h *ResourceHandler) processPatchedObject(w http.ResponseWriter, r *http.Re
 
 	// Set GVK
 	clientObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, clientObj) {
+		return
+	}
 
 	// Convert to storage version before storing
 	storeObj, err := h.convertToStorageVersion(clientObj)

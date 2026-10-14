@@ -175,6 +175,9 @@ func (h *ResourceHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !authorizeRequestObject(w, r, clientObj) {
+		return
+	}
 
 	// Convert to storage version before storing
 	storeObj, err := h.convertToStorageVersion(clientObj)
@@ -228,6 +231,9 @@ func (h *ResourceHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	if !validateParentOwnership(r.Context(), obj) {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !authorizeRequestObject(w, r, obj) {
 		return
 	}
 
@@ -518,6 +524,9 @@ func (h *ResourceHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Set GVK
 	clientObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, clientObj) {
+		return
+	}
 
 	// Validate owner references exist
 	if err := h.validateOwnerReferences(r.Context(), clientObj); err != nil {
@@ -619,6 +628,9 @@ func (h *ResourceHandler) ApplyPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accessor.SetNamespace(namespace)
+	if !authorizeRequestObject(w, r, result) {
+		return
+	}
 
 	// Convert to storage version before storing
 	storeObj, err := h.convertToStorageVersion(result)
@@ -692,6 +704,9 @@ func (h *ResourceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if !validateParentOwnership(r.Context(), existing) {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !authorizeRequestObject(w, r, existing) {
 		return
 	}
 

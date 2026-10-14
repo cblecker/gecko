@@ -181,6 +181,9 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 
 	// Set GVK on public object
 	publicObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, publicObj.(client.Object)) {
+		return
+	}
 
 	// Convert public to private (no existing object)
 	privateObjRaw, err := h.privateScheme.New(h.gvk)
@@ -222,7 +225,6 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-
 	// Set GVK on private object for storage
 	privateObj.GetObjectKind().SetGroupVersionKind(h.gvk)
 
@@ -275,11 +277,18 @@ func (h *ConvertingResourceHandler) Get(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-
 	// Convert to public
 	publicObj, err := h.converter.PrivateToPublic(privateObj)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to public: %v", err))
+		return
+	}
+	publicClientObj, ok := publicObj.(client.Object)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "public object does not implement client.Object")
+		return
+	}
+	if !authorizeRequestObject(w, r, publicClientObj) {
 		return
 	}
 
@@ -578,6 +587,10 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid metadata: %v", err))
 		return
 	}
+	publicObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, publicObj.(client.Object)) {
+		return
+	}
 
 	// Convert public to private, preserving internal fields
 	privateObj, err := h.converter.PublicToPrivate(publicObj, existingPrivate)
@@ -620,7 +633,6 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-
 	// Check if spec changed and increment generation if so.
 	//
 	// Compare against a copy of existingPrivate normalized the same way as
@@ -700,13 +712,26 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	privateObj, httpStatus, err := h.convertPatchToPrivate(r, namespace, name, input)
+	publicObj, httpStatus, err := h.patchPublicObject(namespace, name, input)
 	if err != nil {
 		writeError(w, httpStatus, err.Error())
 		return
 	}
+	if !authorizeRequestObject(w, r, publicObj) {
+		return
+	}
+	privateObj, httpStatus, err := h.convertPatchToPrivate(r, input, publicObj)
+	if err != nil {
+		writeError(w, httpStatus, err.Error())
+		return
+	}
+	privateClientObj, ok := privateObj.(client.Object)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "patched object does not implement client.Object")
+		return
+	}
 
-	if err := h.store.Update(r.Context(), privateObj.(client.Object)); err != nil {
+	if err := h.store.Update(r.Context(), privateClientObj); err != nil {
 		h.logger.V(1).Info("[PATCH-CONVERTING] %s namespace=%s name=%s error=%v", h.gvk.Kind, namespace, name, err)
 		if errors.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -795,11 +820,9 @@ func (h *ConvertingResourceHandler) preparePatch(r *http.Request, namespace, nam
 	}, http.StatusOK, nil
 }
 
-// convertPatchToPrivate converts the validated, merged public object map into
-// a private runtime.Object ready for storage, running custom defaulting and
-// validation, preserving server-managed metadata, and computing the new
-// generation.
-func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, namespace, name string, input patchInput) (runtime.Object, int, error) {
+// patchPublicObject converts the validated, merged public object map into its
+// typed public representation with server-controlled identity restored.
+func (h *ConvertingResourceHandler) patchPublicObject(namespace, name string, input patchInput) (client.Object, int, error) {
 	objJSON, _ := json.Marshal(input.objMap)
 	publicObj, err := h.publicScheme.New(h.gvk)
 	if err != nil {
@@ -819,6 +842,18 @@ func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, names
 	if err := validateMetadata(accessor); err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid metadata: %w", err)
 	}
+	publicObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	clientObj, ok := publicObj.(client.Object)
+	if !ok {
+		return nil, http.StatusInternalServerError, fmt.Errorf("public object does not implement client.Object")
+	}
+	return clientObj, http.StatusOK, nil
+}
+
+// convertPatchToPrivate converts the effective public object into a private
+// runtime.Object ready for storage, running custom defaulting and validation,
+// preserving server-managed metadata, and computing the new generation.
+func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, input patchInput, publicObj client.Object) (runtime.Object, int, error) {
 
 	privateObj, err := h.converter.PublicToPrivate(publicObj, input.existingPrivate)
 	if err != nil {
@@ -893,6 +928,19 @@ func (h *ConvertingResourceHandler) Delete(w http.ResponseWriter, r *http.Reques
 
 	if !validateParentOwnership(r.Context(), existing) {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	authorizationPublic, err := h.converter.PrivateToPublic(existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert object for authorization: %v", err))
+		return
+	}
+	publicClientObj, ok := authorizationPublic.(client.Object)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "public object does not implement client.Object")
+		return
+	}
+	if !authorizeRequestObject(w, r, publicClientObj) {
 		return
 	}
 
