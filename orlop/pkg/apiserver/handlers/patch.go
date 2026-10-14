@@ -60,6 +60,9 @@ func (h *ResourceHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert object version: %v", err))
 		return
 	}
+	if !authorizeRequestObject(w, r, existing) {
+		return
+	}
 
 	// Read patch body
 	patchBytes, err := io.ReadAll(r.Body)
@@ -190,6 +193,13 @@ func (h *ResourceHandler) processPatchedObject(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Authorize the effective object before any mutation side effects, including
+	// finalizer-driven hard deletion.
+	clientObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, clientObj) {
+		return
+	}
+
 	// Preserve deletionTimestamp — it cannot be changed via Patch.
 	// Only Delete sets it, only finalizer removal clears it (via hard-delete).
 	// Without this, a merge patch omitting metadata.deletionTimestamp would
@@ -260,12 +270,6 @@ func (h *ResourceHandler) processPatchedObject(w http.ResponseWriter, r *http.Re
 			json.NewEncoder(w).Encode(clientObj)
 			return
 		}
-	}
-
-	// Set GVK
-	clientObj.GetObjectKind().SetGroupVersionKind(h.gvk)
-	if !authorizeRequestObject(w, r, clientObj) {
-		return
 	}
 
 	// Convert to storage version before storing

@@ -41,7 +41,7 @@ func TestPublicAPIObjectStateAuthorization(t *testing.T) {
 	t.Run("namespaced list filters before pagination", func(t *testing.T) {
 		testNamespacedList(t, server)
 	})
-	t.Run("create update patch and delete use effective rolebinding state", func(t *testing.T) {
+	t.Run("create update patch and delete enforce stored and effective rolebinding state", func(t *testing.T) {
 		testRoleBindingObjectState(t, server)
 	})
 }
@@ -76,6 +76,7 @@ func newPublicAuthorizationTestServer(t *testing.T) publicAuthorizationTestServe
 	seedRoleBinding(t, stores, "project-a", "alice-cluster-viewer", "alice@example.com", "cluster-viewer", &clusterRegionCondition)
 	seedRoleBinding(t, stores, "project-c", "alice-cluster-viewer", "alice@example.com", "cluster-viewer", &clusterRegionCondition)
 	seedRoleBinding(t, stores, "project-a", "existing-eve", "eve@example.com", "cluster-viewer", nil)
+	seedRoleBinding(t, stores, "project-a", "existing-bob", "bob@example.com", "cluster-viewer", nil)
 
 	clusterGVK := privatev1.GroupVersion.WithKind("Cluster")
 	clusterStore, err := storageFactory(apiserver.GroupKindResourceType(clusterGVK.GroupKind()), privateScheme, clusterGVK)
@@ -230,11 +231,21 @@ func testRoleBindingObjectState(t *testing.T, server publicAuthorizationTestServ
 	existingPath := roleBindingPath + "/existing-eve"
 	assertAuthorizationStatus(t, server.request, http.MethodGet, existingPath, nil, "", http.StatusForbidden, "stored disallowed get")
 	assertAuthorizationStatus(t, server.request, http.MethodPut, existingPath,
-		[]byte(`{"metadata":{"name":"existing-eve"},"spec":{"subject":"bob@example.com","roleRef":`+roleRef+`}}`), constants.ContentTypeJSON, http.StatusOK, "allowed replacement update")
+		[]byte(`{"metadata":{"name":"existing-eve"},"spec":{"subject":"bob@example.com","roleRef":`+roleRef+`}}`), constants.ContentTypeJSON, http.StatusForbidden, "stored disallowed replacement update")
 	assertAuthorizationStatus(t, server.request, http.MethodPatch, existingPath,
-		[]byte(`{"spec":{"subject":"eve@example.com"}}`), constants.ContentTypeMergePatch, http.StatusForbidden, "post-patch denied update")
-	assertAuthorizationStatus(t, server.request, http.MethodDelete, existingPath, nil, "", http.StatusOK, "allowed delete")
-	assertAuthorizationStatus(t, server.request, http.MethodGet, existingPath, nil, "", http.StatusNotFound, "missing rolebinding get")
+		[]byte(`{"spec":{"subject":"bob@example.com"}}`), constants.ContentTypeMergePatch, http.StatusForbidden, "stored disallowed patch")
+
+	allowedPath := roleBindingPath + "/existing-bob"
+	assertAuthorizationStatus(t, server.request, http.MethodPut, allowedPath,
+		[]byte(`{"metadata":{"name":"existing-bob"},"spec":{"subject":"bob@example.com","roleRef":`+roleRef+`}}`), constants.ContentTypeJSON, http.StatusOK, "stored and replacement allowed update")
+	assertAuthorizationStatus(t, server.request, http.MethodPatch, allowedPath,
+		[]byte(`{"spec":{"subject":"bob@example.com"}}`), constants.ContentTypeMergePatch, http.StatusOK, "stored and final allowed patch")
+	assertAuthorizationStatus(t, server.request, http.MethodPut, allowedPath,
+		[]byte(`{"metadata":{"name":"existing-bob"},"spec":{"subject":"eve@example.com","roleRef":`+roleRef+`}}`), constants.ContentTypeJSON, http.StatusForbidden, "replacement disallowed update")
+	assertAuthorizationStatus(t, server.request, http.MethodPatch, allowedPath,
+		[]byte(`{"spec":{"subject":"eve@example.com"}}`), constants.ContentTypeMergePatch, http.StatusForbidden, "final disallowed patch")
+	assertAuthorizationStatus(t, server.request, http.MethodDelete, allowedPath, nil, "", http.StatusOK, "allowed delete")
+	assertAuthorizationStatus(t, server.request, http.MethodGet, allowedPath, nil, "", http.StatusNotFound, "missing rolebinding get")
 }
 
 func assertAuthorizationStatus(t *testing.T, request publicAuthorizationRequester, method, path string, body []byte, contentType string, wantStatus int, operation string) {

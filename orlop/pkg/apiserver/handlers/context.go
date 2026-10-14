@@ -41,8 +41,9 @@ func ItemFilterFromContext(ctx context.Context) (storage.ItemFilter, bool) {
 	return filter, ok && filter != nil
 }
 
-// ObjectAuthorizer evaluates an object after a handler has built its effective
-// state and before that handler exposes or persists it.
+// ObjectAuthorizer evaluates an object before a handler exposes or persists it.
+// Handlers that mutate an existing object invoke it for both the stored and
+// effective object states.
 type ObjectAuthorizer func(context.Context, client.Object) (bool, error)
 
 // WithObjectAuthorizer attaches an object-state authorization callback to a
