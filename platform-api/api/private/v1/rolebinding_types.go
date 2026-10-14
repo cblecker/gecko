@@ -6,10 +6,6 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // PlatformRole is cluster-scoped, but the binding itself remains scoped to the
 // namespace in which access is granted.
 //
-// Conditions and object-state filtering are not accepted until the
-// authorization engine evaluates them; accepting them before then would be
-// unsafe.
-//
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 type RoleBinding struct {
@@ -45,6 +41,13 @@ type RoleBindingSpec struct {
 	// +orlop:public
 	// +required
 	RoleRef RoleRef `json:"roleRef"`
+
+	// condition is an optional Cedar expression that further limits the
+	// resources this binding grants access to.
+	// +orlop:public
+	// +optional
+	// +kubebuilder:validation:MaxLength=4096
+	Condition *string `json:"condition,omitempty"`
 }
 
 // RoleRef identifies either a cluster-scoped PlatformRole or a namespaced

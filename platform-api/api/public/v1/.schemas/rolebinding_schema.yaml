@@ -2,10 +2,6 @@ description: |-
   RoleBinding binds an email principal to a PlatformRole or a namespace Role.
   PlatformRole is cluster-scoped, but the binding itself remains scoped to the
   namespace in which access is granted.
-
-  Conditions and object-state filtering are not accepted until the
-  authorization engine evaluates them; accepting them before then would be
-  unsafe.
 properties:
   apiVersion:
     description: |-
@@ -27,6 +23,9 @@ properties:
   spec:
     description: RoleBindingSpec identifies the principal and role granted in a namespace.
     properties:
+      condition:
+        maxLength: 4096
+        type: string
       roleRef:
         description: |-
           RoleRef identifies either a cluster-scoped PlatformRole or a namespaced
