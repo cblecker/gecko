@@ -10,6 +10,7 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
 	"github.com/openshift-online/gecko/platform-api/pkg/authn"
 	"github.com/openshift-online/gecko/platform-api/pkg/publicaccess"
@@ -64,17 +65,7 @@ func Middleware(authorizer *Authorizer, logger logr.Logger, resources []types.Re
 				return
 			}
 			if r.Method == http.MethodGet && !requestInfo.named {
-				allowed, err := authorizer.Authorize(r.Context(), email, action, requestInfo.namespace)
-				if err != nil {
-					logger.Error(err, "authorization evaluation failed closed", "method", r.Method, "resource", requestInfo.plural, "namespace", requestInfo.namespace)
-					writeForbidden(w)
-					return
-				}
-				if !allowed {
-					writeForbidden(w)
-					return
-				}
-				next.ServeHTTP(w, r)
+				handleListAuthorization(w, r, next, authorizer, logger, email, action, requestInfo)
 				return
 			}
 
@@ -147,6 +138,52 @@ func parseRequestPath(rawPath string) (parsedRequest, error) {
 		return parsedRequest{}, fmt.Errorf("cluster-wide named resources are not public")
 	}
 	return result, nil
+}
+
+// handleListAuthorization authorizes a namespaced collection GET request.
+// Binding conditions are evaluated only for each returned object.
+func handleListAuthorization(
+	w http.ResponseWriter,
+	r *http.Request,
+	next http.Handler,
+	authorizer *Authorizer,
+	logger logr.Logger,
+	email string,
+	action Action,
+	request parsedRequest,
+) {
+	allowed, err := authorizer.HasNamespacePermission(r.Context(), email, action, request.namespace)
+	if err != nil {
+		logger.Error(err, "authorization list permission check failed closed", "resource", request.plural, "namespace", request.namespace)
+		writeForbidden(w)
+		return
+	}
+	if !allowed {
+		writeForbidden(w)
+		return
+	}
+
+	ctx := handlers.WithItemFilter(r.Context(), itemFilter(authorizer, logger, email, action, request.plural, r.Method))
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func itemFilter(authorizer *Authorizer, logger logr.Logger, email string, action Action, resourcePlural, method string) storage.ItemFilter {
+	return func(ctx context.Context, object client.Object) (bool, error) {
+		if object == nil || object.GetNamespace() == "" {
+			return false, nil
+		}
+		requestContext, err := CedarContextForObject(object, resourcePlural, method)
+		if err != nil {
+			logger.Error(err, "authorization item context could not be built", "resource", resourcePlural, "namespace", object.GetNamespace(), "name", object.GetName())
+			return false, nil
+		}
+		allowed, err := authorizer.AuthorizeWithContext(ctx, email, action, object.GetNamespace(), requestContext)
+		if err != nil {
+			logger.Error(err, "authorization item evaluation failed closed", "resource", resourcePlural, "namespace", object.GetNamespace(), "name", object.GetName())
+			return false, nil
+		}
+		return allowed, nil
+	}
 }
 
 func objectAuthorizer(authorizer *Authorizer, logger logr.Logger, email string, action Action, request parsedRequest, method string) handlers.ObjectAuthorizer {

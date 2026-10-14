@@ -200,6 +200,83 @@ func TestAuthorizerFailsClosedWhenAllMatchingBindingsHaveEvaluationErrors(t *tes
 	}
 }
 
+func TestHasNamespacePermissionIgnoresBindingConditions(t *testing.T) {
+	stores, authorizer := newTestAuthorizer(t)
+	role := &privatev1.PlatformRole{Spec: privatev1.PlatformRoleSpec{Permissions: []string{"cluster.list"}}}
+	role.Name = "cluster-viewer"
+	role.SetGroupVersionKind(privatev1.GroupVersion.WithKind("PlatformRole"))
+	if err := stores.PlatformRoles.Create(context.Background(), role); err != nil {
+		t.Fatal(err)
+	}
+	condition := "false"
+	binding := &privatev1.RoleBinding{
+		Spec: privatev1.RoleBindingSpec{
+			Subject:   "alice@example.com",
+			RoleRef:   privatev1.RoleRef{Kind: "PlatformRole", Name: "cluster-viewer", APIGroup: privatev1.GroupVersion.Group},
+			Condition: &condition,
+		},
+	}
+	binding.Name = "conditioned-viewer"
+	binding.Namespace = "project-a"
+	binding.SetGroupVersionKind(privatev1.GroupVersion.WithKind("RoleBinding"))
+	if err := stores.RoleBindings.Create(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := authorizer.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := authorizer.HasNamespacePermission(context.Background(), "alice@example.com", ListClusters, "project-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
+		t.Fatal("HasNamespacePermission() = false, want true")
+	}
+	allowed, err = authorizer.HasNamespacePermission(context.Background(), "alice@example.com", ListClusters, "project-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
+		t.Fatal("HasNamespacePermission() = true, want false for project-b")
+	}
+}
+
+func TestHasNamespacePermissionResolvesNamespacedRole(t *testing.T) {
+	stores, authorizer := newTestAuthorizer(t)
+	role := &privatev1.Role{Spec: privatev1.RoleSpec{Permissions: []string{"cluster.list"}}}
+	role.Name = "cluster-viewer"
+	role.Namespace = "project-a"
+	role.SetGroupVersionKind(privatev1.GroupVersion.WithKind("Role"))
+	if err := stores.Roles.Create(context.Background(), role); err != nil {
+		t.Fatal(err)
+	}
+	binding := &privatev1.RoleBinding{
+		Spec: privatev1.RoleBindingSpec{
+			Subject: "alice@example.com",
+			RoleRef: privatev1.RoleRef{
+				Kind:     "Role",
+				Name:     "cluster-viewer",
+				APIGroup: privatev1.GroupVersion.Group,
+			},
+		},
+	}
+	binding.Name = "namespaced-viewer"
+	binding.Namespace = "project-a"
+	binding.SetGroupVersionKind(privatev1.GroupVersion.WithKind("RoleBinding"))
+	if err := stores.RoleBindings.Create(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+
+	allowed, err := authorizer.HasNamespacePermission(context.Background(), "alice@example.com", ListClusters, "project-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
+		t.Fatal("HasNamespacePermission() = false, want true")
+	}
+}
+
 func TestAuthorizerSupportsResourcePluralGuards(t *testing.T) {
 	stores, authorizer := newTestAuthorizer(t)
 	role := &privatev1.PlatformRole{Spec: privatev1.PlatformRoleSpec{Permissions: []string{"cluster.get", "nodepool.get"}}}

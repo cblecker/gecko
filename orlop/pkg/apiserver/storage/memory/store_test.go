@@ -431,6 +431,56 @@ func TestMemoryStore_List(t *testing.T) {
 	})
 }
 
+func TestMemoryStoreListAppliesItemFilterBeforePagination(t *testing.T) {
+	store := newTestStore()
+	ctx := context.Background()
+	objects := []*unstructured.Unstructured{
+		newTestObject(withName("a-denied"), withNamespace("team-a"), withLabels(map[string]string{"visible": "false"})),
+		newTestObject(withName("b-allowed"), withNamespace("team-a"), withLabels(map[string]string{"visible": "true"})),
+		newTestObject(withName("c-allowed"), withNamespace("team-a"), withLabels(map[string]string{"visible": "true"})),
+		newTestObject(withName("a-outside-scope"), withNamespace("team-b"), withLabels(map[string]string{"visible": "true"})),
+	}
+	for _, object := range objects {
+		if err := store.Create(ctx, object); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	filter := func(_ context.Context, object client.Object) (bool, error) {
+		return object.GetLabels()["visible"] == "true", nil
+	}
+	options := storage.ListOptions{
+		Namespace:  "team-a",
+		ItemFilter: filter,
+	}
+	options.Limit = 1
+	first, err := store.List(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstItems := first.(*unstructured.UnstructuredList).Items
+	if len(firstItems) != 1 || firstItems[0].GetNamespace() != "team-a" || firstItems[0].GetName() != "b-allowed" {
+		t.Fatalf("first page = %#v, want team-a/b-allowed", firstItems)
+	}
+	continueToken := first.GetContinue()
+	if continueToken == "" {
+		t.Fatal("first page has no continue token")
+	}
+
+	options.Continue = continueToken
+	second, err := store.List(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondItems := second.(*unstructured.UnstructuredList).Items
+	if len(secondItems) != 1 || secondItems[0].GetNamespace() != "team-a" || secondItems[0].GetName() != "c-allowed" {
+		t.Fatalf("second page = %#v, want team-a/c-allowed", secondItems)
+	}
+	if second.GetContinue() != "" {
+		t.Fatalf("second page continue = %q, want empty", second.GetContinue())
+	}
+}
+
 func TestMemoryStore_Watch(t *testing.T) {
 	t.Run("receives ADDED event on create", func(t *testing.T) {
 		store := newTestStore()

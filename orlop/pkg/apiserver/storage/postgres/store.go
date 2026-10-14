@@ -327,11 +327,9 @@ func (s *PostgresStore) List(ctx context.Context, opts storage.ListOptions) (cli
 	// Collect results
 	var items []unstructured.Unstructured
 	var maxRV int64
-	rowCount := int64(0)
+	var hasMore bool
 
 	for rows.Next() {
-		rowCount++
-
 		var namespace, name string
 		var rv int64
 		var data []byte
@@ -339,14 +337,25 @@ func (s *PostgresStore) List(ctx context.Context, opts storage.ListOptions) (cli
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		// Stop if we've reached the limit (the extra row is for hasMore detection)
-		if opts.Limit > 0 && rowCount > opts.Limit {
-			break
-		}
-
 		obj, err := unmarshalData(data, rv)
 		if err != nil {
 			return nil, err
+		}
+
+		allowed, err := storage.FilterItem(ctx, opts.ItemFilter, obj)
+		if err != nil {
+			return nil, fmt.Errorf("filter list item: %w", err)
+		}
+		if !allowed {
+			continue
+		}
+
+		// With an item filter, the SQL query is intentionally unbounded so
+		// filtering occurs before page accounting. Without one, buildListQuery
+		// asks for one extra row to detect a following page.
+		if opts.Limit > 0 && int64(len(items)) >= opts.Limit {
+			hasMore = true
+			break
 		}
 
 		items = append(items, *obj)
@@ -371,8 +380,7 @@ func (s *PostgresStore) List(ctx context.Context, opts storage.ListOptions) (cli
 	list.SetResourceVersion(strconv.FormatInt(maxRV, 10))
 	list.Items = items
 
-	// Set continue token if there are more results
-	hasMore := opts.Limit > 0 && rowCount > opts.Limit
+	// Set continue token if there are more visible results.
 	if hasMore && len(items) > 0 {
 		listMeta, err := meta.ListAccessor(list)
 		if err == nil {
@@ -610,7 +618,7 @@ func (s *PostgresStore) Watch(ctx context.Context, opts storage.ListOptions, res
 				// Apply filters
 				clientObj := event.Object
 
-				// Filter by namespace
+				// Filter by namespace.
 				if opts.Namespace != "" && clientObj.GetNamespace() != opts.Namespace {
 					continue
 				}
@@ -630,6 +638,11 @@ func (s *PostgresStore) Watch(ctx context.Context, opts storage.ListOptions, res
 
 				// Filter by field filters
 				if len(opts.FieldFilters) > 0 && !matchesFieldFilters(clientObj, opts.FieldFilters) {
+					continue
+				}
+
+				allowed, err := storage.FilterItem(ctx, opts.ItemFilter, clientObj)
+				if err != nil || !allowed {
 					continue
 				}
 
@@ -748,8 +761,10 @@ func (s *PostgresStore) buildListQuery(opts storage.ListOptions, filterValue str
 
 	qb.OrderBy("namespace", "name")
 
-	// Add limit with +1 for hasMore detection
-	if opts.Limit > 0 {
+	// An item filter must run before the page limit, so fetch candidates until
+	// List has collected one additional visible item. For ordinary lists, keep
+	// the database-side limit for efficiency.
+	if opts.Limit > 0 && opts.ItemFilter == nil {
 		qb.Limit(opts.Limit + 1)
 	}
 

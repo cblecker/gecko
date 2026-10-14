@@ -254,10 +254,9 @@ func (s *MemoryStore) List(ctx context.Context, opts storage.ListOptions) (clien
 		if !s.storageKeyMatchesFilter(key, filterValue) {
 			continue
 		}
-		// Use the base key (without filter prefix) for namespace matching
+		// Use the base key (without filter prefix) for namespace matching.
 		baseKey := s.stripFilterPrefix(key)
-		// Filter by namespace
-		if opts.Namespace != "" && !s.matchesNamespace(baseKey, opts.Namespace) {
+		if !s.matchesListNamespace(baseKey, opts.Namespace) {
 			continue
 		}
 		keys = append(keys, key)
@@ -306,6 +305,16 @@ func (s *MemoryStore) List(ctx context.Context, opts storage.ListOptions) (clien
 
 		// Filter by field filters
 		if len(opts.FieldFilters) > 0 && !matchesFieldFilters(obj, opts.FieldFilters) {
+			continue
+		}
+
+		// Apply the caller-provided item filter before pagination so a page is
+		// filled with visible items rather than raw storage rows.
+		allowed, err := storage.FilterItem(ctx, opts.ItemFilter, obj)
+		if err != nil {
+			return nil, fmt.Errorf("filter list item: %w", err)
+		}
+		if !allowed {
 			continue
 		}
 
@@ -457,6 +466,10 @@ func (s *MemoryStore) matchesNamespace(key, namespace string) bool {
 	return len(key) > len(expectedPrefix) && key[:len(expectedPrefix)] == expectedPrefix
 }
 
+func (s *MemoryStore) matchesListNamespace(key, namespace string) bool {
+	return namespace == "" || s.matchesNamespace(key, namespace)
+}
+
 // parseKey extracts namespace and name from a storage key.
 func (s *MemoryStore) parseKey(key string) (namespace, name string) {
 	parts := strings.SplitN(key, "/", 2)
@@ -535,13 +548,10 @@ func (s *MemoryStore) Watch(ctx context.Context, opts storage.ListOptions, resou
 					}
 				}
 
-				// Filter by namespace
+				// Filter by namespace.
 				if opts.Namespace != "" {
 					accessor, err := meta.Accessor(event.Object)
-					if err != nil {
-						continue
-					}
-					if accessor.GetNamespace() != opts.Namespace {
+					if err != nil || accessor.GetNamespace() != opts.Namespace {
 						continue
 					}
 				}
@@ -570,6 +580,11 @@ func (s *MemoryStore) Watch(ctx context.Context, opts storage.ListOptions, resou
 					if !matchesFieldFilters(event.Object, opts.FieldFilters) {
 						continue
 					}
+				}
+
+				allowed, err := storage.FilterItem(ctx, opts.ItemFilter, event.Object)
+				if err != nil || !allowed {
+					continue
 				}
 
 				// Send filtered event

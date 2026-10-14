@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -302,31 +305,18 @@ func (h *ConvertingResourceHandler) Get(w http.ResponseWriter, r *http.Request) 
 // List handles GET requests to list resources.
 func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, constants.URLParamNamespace)
-	if namespace == "" {
-		h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "scope", "cluster")
-	} else {
-		h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "namespace", namespace)
-	}
+	h.logListRequest(namespace)
 
-	// Build list options from query parameters
-	opts := storage.ListOptions{
-		Namespace: namespace,
+	opts, err := h.listOptions(r, namespace)
+	if err != nil {
+		h.logger.V(1).Info("Invalid list options", "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-
-	// Parse label selector from query parameter
-	if labelSelectorStr := r.URL.Query().Get(constants.QueryParamLabelSelector); labelSelectorStr != "" {
-		opts.LabelSelector = labelSelectorStr
-	}
-
-	applyParentFilterToListOpts(r.Context(), &opts)
 
 	// Check if this is a watch request
 	if r.URL.Query().Get(constants.QueryParamWatch) == "true" {
-		if namespace == "" {
-			h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "scope", "cluster", "uri", r.RequestURI)
-		} else {
-			h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "namespace", namespace, "uri", r.RequestURI)
-		}
+		h.logWatchRequest(namespace, r.RequestURI)
 		h.handleWatch(w, r, opts)
 		return
 	}
@@ -334,115 +324,195 @@ func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request)
 	// Get private objects list from storage
 	privateList, err := h.store.List(r.Context(), opts)
 	if err != nil {
-		if namespace == "" {
-			h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "scope", "cluster")
-		} else {
-			h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "namespace", namespace)
-		}
+		h.logListError(err, namespace)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list objects: %v", err))
 		return
 	}
 
-	// Extract items from the list using meta.ExtractList
-	privateItems, err := meta.ExtractList(privateList)
+	publicObjects, err := h.publicListObjects(privateList)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to extract list items: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Convert each private object to public
+	if h.writeTableList(w, r, privateList, publicObjects, namespace) {
+		return
+	}
+	h.writeJSONList(w, privateList, publicObjects, namespace)
+}
+
+func (h *ConvertingResourceHandler) listOptions(r *http.Request, namespace string) (storage.ListOptions, error) {
+	opts := storage.ListOptions{Namespace: namespace}
+	if filter, ok := ItemFilterFromContext(r.Context()); ok {
+		opts.ItemFilter = h.publicItemFilter(filter)
+	}
+
+	if labelSelector := r.URL.Query().Get(constants.QueryParamLabelSelector); labelSelector != "" {
+		if _, err := labels.Parse(labelSelector); err != nil {
+			return storage.ListOptions{}, fmt.Errorf("invalid label selector: %w", err)
+		}
+		opts.LabelSelector = labelSelector
+	}
+	shardSelector, err := storage.ParseShardSelector(
+		r.URL.Query().Get(constants.QueryParamShardIndex),
+		r.URL.Query().Get(constants.QueryParamShardCount),
+	)
+	if err != nil {
+		return storage.ListOptions{}, fmt.Errorf("invalid shard selector: %w", err)
+	}
+	opts.ShardSelector = shardSelector
+	applyParentFilterToListOpts(r.Context(), &opts)
+
+	if limitString := r.URL.Query().Get(constants.QueryParamLimit); limitString != "" {
+		limit, err := strconv.ParseInt(limitString, 10, 64)
+		if err != nil || limit < 0 {
+			return storage.ListOptions{}, fmt.Errorf("invalid limit parameter")
+		}
+		opts.Limit = limit
+	}
+	opts.Continue = r.URL.Query().Get(constants.QueryParamContinue)
+	return opts, nil
+}
+
+func (h *ConvertingResourceHandler) publicItemFilter(filter storage.ItemFilter) storage.ItemFilter {
+	return func(ctx context.Context, privateObj client.Object) (bool, error) {
+		publicObj, err := h.converter.PrivateToPublic(privateObj)
+		if err != nil {
+			return false, fmt.Errorf("convert object for item authorization: %w", err)
+		}
+		publicClientObj, ok := publicObj.(client.Object)
+		if !ok {
+			return false, fmt.Errorf("public object does not implement client.Object")
+		}
+		return filter(ctx, publicClientObj)
+	}
+}
+
+func (h *ConvertingResourceHandler) publicListObjects(privateList client.ObjectList) ([]runtime.Object, error) {
+	privateItems, err := meta.ExtractList(privateList)
+	if err != nil {
+		return nil, fmt.Errorf("extract list items: %w", err)
+	}
 	publicObjects := make([]runtime.Object, 0, len(privateItems))
 	for _, privateObj := range privateItems {
 		publicObj, err := h.converter.PrivateToPublic(privateObj)
 		if err != nil {
-			continue // Skip objects that fail conversion
+			continue
 		}
 		publicObjects = append(publicObjects, publicObj)
 	}
+	return publicObjects, nil
+}
 
-	// Check if client wants Table format (kubectl does)
-	// Accept header may contain multiple media types with parameters like:
-	// "application/json;as=Table;v=v1;g=meta.k8s.io,application/json"
-	wantsTable := false
-	acceptHeader := r.Header.Get("Accept")
-	for _, part := range strings.Split(acceptHeader, ",") {
+func (h *ConvertingResourceHandler) writeTableList(w http.ResponseWriter, r *http.Request, privateList client.ObjectList, publicObjects []runtime.Object, namespace string) bool {
+	if !requestsTable(r) || len(h.printerColumns) == 0 {
+		return false
+	}
+
+	gr := runtimeschema.GroupResource{Group: h.gvk.Group, Resource: h.resourceType}
+	convertor := aggregated.NewCustomTableConvertor(gr, h.printerColumns)
+	unstructuredList := &unstructured.UnstructuredList{}
+	unstructuredList.SetAPIVersion(h.gvk.GroupVersion().String())
+	unstructuredList.SetKind(h.gvk.Kind + "List")
+	unstructuredList.SetResourceVersion(privateList.GetResourceVersion())
+	if listMeta, err := meta.ListAccessor(privateList); err == nil {
+		unstructuredList.SetContinue(listMeta.GetContinue())
+		unstructuredList.SetRemainingItemCount(listMeta.GetRemainingItemCount())
+	}
+	for _, obj := range publicObjects {
+		unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+		if err != nil {
+			h.logger.V(1).Info("Failed to convert object to unstructured for table", "error", err)
+			continue
+		}
+		unstructuredList.Items = append(unstructuredList.Items, unstructured.Unstructured{Object: unstructuredObj})
+	}
+	table, err := convertor.ConvertToTable(r.Context(), unstructuredList, nil)
+	if err != nil {
+		h.logger.Error(err, "Table conversion failed", "kind", h.gvk.Kind)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to table: %v", err))
+		return true
+	}
+	h.logListed(namespace, len(publicObjects), "Listed as Table (converting)")
+	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(table); err != nil {
+		h.logger.Error(err, "Failed to encode Table response", "kind", h.gvk.Kind)
+	}
+	return true
+}
+
+func requestsTable(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
 		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
 		if err != nil {
 			continue
 		}
-		if mediaType == "application/json" && params["as"] == "Table" {
-			// Check quality value - q=0 means "not acceptable"
-			if q := params["q"]; q != "" && q == "0" {
-				continue
-			}
-			wantsTable = true
-			break
+		if mediaType == "application/json" && params["as"] == "Table" && params["q"] != "0" {
+			return true
 		}
 	}
+	return false
+}
 
-	if wantsTable && h.printerColumns != nil && len(h.printerColumns) > 0 {
-		// Convert to Table format using CustomTableConvertor
-		gr := runtimeschema.GroupResource{Group: h.gvk.Group, Resource: h.resourceType}
-		convertor := aggregated.NewCustomTableConvertor(gr, h.printerColumns)
-
-		// Convert list to unstructured for table conversion
-		unstructuredList := &unstructured.UnstructuredList{}
-		unstructuredList.SetAPIVersion(h.gvk.GroupVersion().String())
-		unstructuredList.SetKind(h.gvk.Kind + "List")
-		unstructuredList.SetResourceVersion(privateList.GetResourceVersion())
-
-		// Convert public objects to unstructured items
-		for _, obj := range publicObjects {
-			unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-			if err != nil {
-				h.logger.V(1).Info("Failed to convert object to unstructured for table", "error", err)
-				continue
-			}
-			unstructuredList.Items = append(unstructuredList.Items, unstructured.Unstructured{Object: unstructuredObj})
-		}
-
-		// ConvertToTable with nil opts uses default table conversion options
-		table, err := convertor.ConvertToTable(r.Context(), unstructuredList, nil)
-		if err != nil {
-			h.logger.Error(err, "Table conversion failed", "kind", h.gvk.Kind)
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to table: %v", err))
-			return
-		}
-
-		if namespace == "" {
-			h.logger.V(1).Info("Listed as Table (converting)", "kind", h.gvk.Kind, "scope", "cluster", "count", len(publicObjects))
-		} else {
-			h.logger.V(1).Info("Listed as Table (converting)", "kind", h.gvk.Kind, "namespace", namespace, "count", len(publicObjects))
-		}
-
-		w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(table); err != nil {
-			h.logger.Error(err, "Failed to encode Table response", "kind", h.gvk.Kind)
-		}
-		return
-	}
-
-	// Build list response manually as JSON to avoid type conversion issues
-	// meta.SetList() requires exact type matches which don't work across packages
+func (h *ConvertingResourceHandler) writeJSONList(w http.ResponseWriter, privateList client.ObjectList, publicObjects []runtime.Object, namespace string) {
 	listResponse := map[string]interface{}{
-		"apiVersion": h.gvk.GroupVersion().String(),
-		"kind":       h.gvk.Kind + "List",
-		constants.FieldMetadata: map[string]interface{}{
-			"resourceVersion": privateList.GetResourceVersion(),
-		},
-		"items": publicObjects,
+		"apiVersion":            h.gvk.GroupVersion().String(),
+		"kind":                  h.gvk.Kind + "List",
+		constants.FieldMetadata: listMetadata(privateList),
+		"items":                 publicObjects,
 	}
-
-	if namespace == "" {
-		h.logger.V(1).Info("Listed (converting)", "kind", h.gvk.Kind, "scope", "cluster", "count", len(publicObjects))
-	} else {
-		h.logger.V(1).Info("Listed (converting)", "kind", h.gvk.Kind, "namespace", namespace, "count", len(publicObjects))
-	}
-
+	h.logListed(namespace, len(publicObjects), "Listed (converting)")
 	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(listResponse)
+	_ = json.NewEncoder(w).Encode(listResponse)
+}
+
+func listMetadata(list client.ObjectList) map[string]interface{} {
+	metadata := map[string]interface{}{"resourceVersion": list.GetResourceVersion()}
+	listMeta, err := meta.ListAccessor(list)
+	if err != nil {
+		return metadata
+	}
+	if continueToken := listMeta.GetContinue(); continueToken != "" {
+		metadata["continue"] = continueToken
+	}
+	if remainingItemCount := listMeta.GetRemainingItemCount(); remainingItemCount != nil {
+		metadata["remainingItemCount"] = *remainingItemCount
+	}
+	return metadata
+}
+
+func (h *ConvertingResourceHandler) logListRequest(namespace string) {
+	if namespace == "" {
+		h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "scope", "cluster")
+		return
+	}
+	h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "namespace", namespace)
+}
+
+func (h *ConvertingResourceHandler) logWatchRequest(namespace, uri string) {
+	if namespace == "" {
+		h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "scope", "cluster", "uri", uri)
+		return
+	}
+	h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "namespace", namespace, "uri", uri)
+}
+
+func (h *ConvertingResourceHandler) logListError(err error, namespace string) {
+	if namespace == "" {
+		h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "scope", "cluster")
+		return
+	}
+	h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "namespace", namespace)
+}
+
+func (h *ConvertingResourceHandler) logListed(namespace string, count int, message string) {
+	if namespace == "" {
+		h.logger.V(1).Info(message, "kind", h.gvk.Kind, "scope", "cluster", "count", count)
+		return
+	}
+	h.logger.V(1).Info(message, "kind", h.gvk.Kind, "namespace", namespace, "count", count)
 }
 
 // handleWatch handles watch requests using streaming JSON.

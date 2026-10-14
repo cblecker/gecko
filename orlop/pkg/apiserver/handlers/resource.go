@@ -263,6 +263,7 @@ func (h *ResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 	opts := storage.ListOptions{
 		Namespace: namespace,
 	}
+	applyItemFilterToListOptions(r.Context(), &opts)
 
 	// Parse label selector from query parameter
 	if labelSelectorStr := r.URL.Query().Get(constants.QueryParamLabelSelector); labelSelectorStr != "" {

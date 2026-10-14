@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +38,9 @@ func TestPublicAPIObjectStateAuthorization(t *testing.T) {
 	t.Run("object-state get and not found", func(t *testing.T) {
 		testObjectStateGet(t, server)
 	})
+	t.Run("namespaced list filters before pagination", func(t *testing.T) {
+		testNamespacedList(t, server)
+	})
 	t.Run("create update patch and delete use effective rolebinding state", func(t *testing.T) {
 		testRoleBindingObjectState(t, server)
 	})
@@ -70,6 +74,7 @@ func newPublicAuthorizationTestServer(t *testing.T) publicAuthorizationTestServe
 	clusterRegionCondition := `context.spec.platform.gcp.region == "us-east1"`
 	seedRoleBinding(t, stores, "project-a", "alice-service-admin", "alice@example.com", "service-admin", &serviceAdminCondition)
 	seedRoleBinding(t, stores, "project-a", "alice-cluster-viewer", "alice@example.com", "cluster-viewer", &clusterRegionCondition)
+	seedRoleBinding(t, stores, "project-c", "alice-cluster-viewer", "alice@example.com", "cluster-viewer", &clusterRegionCondition)
 	seedRoleBinding(t, stores, "project-a", "existing-eve", "eve@example.com", "cluster-viewer", nil)
 
 	clusterGVK := privatev1.GroupVersion.WithKind("Cluster")
@@ -81,6 +86,7 @@ func newPublicAuthorizationTestServer(t *testing.T) publicAuthorizationTestServe
 		testCluster("project-a", "east", "us-east1"),
 		testCluster("project-a", "west", "us-west1"),
 		testCluster("project-a", "east-b", "us-east1"),
+		testCluster("project-c", "west", "us-west1"),
 	} {
 		if err := clusterStore.Create(context.Background(), cluster); err != nil {
 			t.Fatal(err)
@@ -165,6 +171,46 @@ func testObjectStateGet(t *testing.T, server publicAuthorizationTestServer) {
 	}
 	if status, body := server.request(http.MethodGet, server.apiPrefix+"/namespaces/project-a/clusters/missing", nil, ""); status != http.StatusNotFound {
 		t.Fatalf("missing get = %d, want 404: %s", status, body)
+	}
+}
+
+func testNamespacedList(t *testing.T, server publicAuthorizationTestServer) {
+	t.Helper()
+	path := server.apiPrefix + "/namespaces/project-a/clusters"
+	status, body := server.request(http.MethodGet, path+"?limit=1", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("first list = %d, want 200: %s", status, body)
+	}
+	first := decodeListResponse(t, body)
+	if names := listItemNames(t, first); len(names) != 1 || names[0] != "east" {
+		t.Fatalf("first list items = %v, want [east]", names)
+	}
+	continueToken := listContinueToken(t, first)
+	if continueToken == "" {
+		t.Fatal("first list has no continue token")
+	}
+	if containsJSON(body, "west") {
+		t.Fatalf("filtered cluster appeared in response: %s", body)
+	}
+
+	status, body = server.request(http.MethodGet, path+"?limit=1&continue="+continueToken, nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("second list = %d, want 200: %s", status, body)
+	}
+	second := decodeListResponse(t, body)
+	if names := listItemNames(t, second); len(names) != 1 || names[0] != "east-b" {
+		t.Fatalf("second list items = %v, want [east-b]", names)
+	}
+	if listContinueToken(t, second) != "" {
+		t.Fatalf("second list has unexpected continue token: %s", body)
+	}
+
+	status, body = server.request(http.MethodGet, server.apiPrefix+"/namespaces/project-c/clusters", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("empty filtered list = %d, want 200: %s", status, body)
+	}
+	if names := listItemNames(t, decodeListResponse(t, body)); len(names) != 0 {
+		t.Fatalf("empty filtered list items = %v, want none", names)
 	}
 }
 
@@ -265,4 +311,49 @@ func testCluster(namespace, name, region string) *privatev1.Cluster {
 	}
 	cluster.SetGroupVersionKind(privatev1.GroupVersion.WithKind("Cluster"))
 	return cluster
+}
+
+func decodeListResponse(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var response map[string]any
+	if err := json.Unmarshal([]byte(body), &response); err != nil {
+		t.Fatalf("decode list response: %v\n%s", err, body)
+	}
+	return response
+}
+
+func listItemNames(t *testing.T, response map[string]any) []string {
+	t.Helper()
+	items, ok := response["items"].([]any)
+	if !ok {
+		t.Fatalf("list items = %#v", response["items"])
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("list item = %#v", item)
+		}
+		metadata, ok := object["metadata"].(map[string]any)
+		if !ok {
+			t.Fatalf("item metadata = %#v", object["metadata"])
+		}
+		name, _ := metadata["name"].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
+func listContinueToken(t *testing.T, response map[string]any) string {
+	t.Helper()
+	metadata, ok := response["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("list metadata = %#v", response["metadata"])
+	}
+	continueToken, _ := metadata["continue"].(string)
+	return continueToken
+}
+
+func containsJSON(body, value string) bool {
+	return bytes.Contains([]byte(body), []byte(value))
 }

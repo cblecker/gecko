@@ -144,6 +144,74 @@ func TestMiddlewareFailsClosedWithoutAuthorizer(t *testing.T) {
 	}
 }
 
+func TestMiddlewareNamespacedListFiltersObjectState(t *testing.T) {
+	stores, authorizer := newTestAuthorizer(t)
+	condition := `context.spec.region == "us-east1"`
+	seedClusterListBinding(t, stores, "project-a", &condition)
+	if err := authorizer.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	resources := []types.ResourceInfo{{
+		GVK:        runtimeschema.GroupVersionKind{Group: "gcp.managed.openshift.io", Version: "v1", Kind: "Cluster"},
+		Plural:     "clusters",
+		Namespaced: true,
+	}}
+	ctx := authn.WithUser(context.Background(), "alice@example.com")
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/apis/gcp.managed.openshift.io/v1/namespaces/project-a/clusters", nil)
+	response := httptest.NewRecorder()
+	Middleware(authorizer, logr.Discard(), resources)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filter, ok := handlers.ItemFilterFromContext(r.Context())
+		if !ok {
+			t.Fatal("item filter was not added to the request context")
+		}
+		allowed, err := filter(r.Context(), authorizationTestObject("east", "us-east1"))
+		if err != nil || !allowed {
+			t.Fatalf("allowed object filter result = %t, %v; want allowed", allowed, err)
+		}
+		allowed, err = filter(r.Context(), authorizationTestObject("west", "us-west1"))
+		if err != nil || allowed {
+			t.Fatalf("denied object filter result = %t, %v; want denied", allowed, err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
+func TestMiddlewareNamespacedListUsesPermissionBeforeConditions(t *testing.T) {
+	stores, authorizer := newTestAuthorizer(t)
+	condition := "false"
+	seedClusterListBinding(t, stores, "project-a", &condition)
+	if err := authorizer.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	resources := []types.ResourceInfo{{
+		GVK:        runtimeschema.GroupVersionKind{Group: "gcp.managed.openshift.io", Version: "v1", Kind: "Cluster"},
+		Plural:     "clusters",
+		Namespaced: true,
+	}}
+	ctx := authn.WithUser(context.Background(), "alice@example.com")
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/apis/gcp.managed.openshift.io/v1/namespaces/project-a/clusters", nil)
+	response := httptest.NewRecorder()
+	Middleware(authorizer, logr.Discard(), resources)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filter, ok := handlers.ItemFilterFromContext(r.Context())
+		if !ok {
+			t.Fatal("item filter was not added to the request context")
+		}
+		allowed, err := filter(r.Context(), authorizationTestObject("cluster", "us-east1"))
+		if err != nil || allowed {
+			t.Fatalf("item filter result = %t, %v; want denied", allowed, err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
 func TestMiddlewareDefersObjectAuthorizationToHandler(t *testing.T) {
 	stores, authorizer := newTestAuthorizer(t)
 	condition := `context.spec.region == "us-east1"`
@@ -178,6 +246,11 @@ func TestMiddlewareDefersObjectAuthorizationToHandler(t *testing.T) {
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
 	}
+}
+
+func seedClusterListBinding(t *testing.T, stores Stores, namespace string, condition *string) {
+	t.Helper()
+	seedClusterBinding(t, stores, namespace, []string{"cluster.list"}, condition)
 }
 
 func seedClusterGetBinding(t *testing.T, stores Stores, namespace string, condition *string) {
