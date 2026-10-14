@@ -16,6 +16,9 @@ const (
 
 	// HeaderTransferEncoding is the Transfer-Encoding HTTP header.
 	HeaderTransferEncoding = "Transfer-Encoding"
+
+	// HeaderRequestID identifies a server-generated request for support and log correlation.
+	HeaderRequestID = "X-Request-ID"
 )
 
 // Content Types

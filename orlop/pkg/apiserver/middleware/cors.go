@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/cors"
+
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 )
 
 // CORSOptions holds CORS configuration.
@@ -36,7 +38,7 @@ func CORS(opts CORSOptions) func(http.Handler) http.Handler {
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowedHeaders:   []string{"Accept", "Content-Type", "Authorization", "X-Requested-With"},
-		ExposedHeaders:   []string{"Content-Length", "Content-Type"},
+		ExposedHeaders:   []string{"Content-Length", "Content-Type", constants.HeaderRequestID},
 		AllowCredentials: !allowAll, // Don't allow credentials with wildcard origin
 		MaxAge:           300,
 	})

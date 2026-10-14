@@ -2,13 +2,17 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
 	"strings"
+	"sync/atomic"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/types"
@@ -18,6 +22,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	authorizationReasonInvalidPath             = "invalid_request_path"
+	authorizationReasonClusterScopedRequest    = "cluster_scoped_request"
+	authorizationReasonUnsupportedOperation    = "unsupported_operation"
+	authorizationReasonListPermissionCheck     = "list_permission_check_failed"
+	authorizationReasonObjectContextBuild      = "object_context_build_failed"
+	authorizationReasonPolicyEvaluation        = "policy_evaluation_failed"
+	authorizationReasonObjectNamespaceMismatch = "object_namespace_mismatch"
+)
+
+var (
+	errAuthorizationNotConfigured        = errors.New("authorization is not configured")
+	errAuthorizationListPermissionCheck  = errors.New("authorization list permission check failed")
+	errAuthorizationObjectContextBuild   = errors.New("authorization object context build failed")
+	errAuthorizationPolicyEvaluation     = errors.New("authorization policy evaluation failed")
+	errAuthorizationObjectNamespaceMatch = errors.New("authorization object namespace mismatch")
+)
+
 // Middleware enforces Cedar authorization for public CRUD API requests.
 func Middleware(authorizer *Authorizer, logger logr.Logger, resources []types.ResourceInfo) func(http.Handler) http.Handler {
 	if logger.GetSink() == nil {
@@ -25,6 +47,10 @@ func Middleware(authorizer *Authorizer, logger logr.Logger, resources []types.Re
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestID := uuid.NewString()
+			requestLogger := logger.WithValues("requestID", requestID)
+			w.Header().Set(constants.HeaderRequestID, requestID)
+
 			if isMetadataPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
@@ -40,36 +66,37 @@ func Middleware(authorizer *Authorizer, logger logr.Logger, resources []types.Re
 				return
 			}
 			if authorizer == nil {
-				logger.Error(fmt.Errorf("authorizer is not configured"), "authorization denied")
+				requestLogger.Error(errAuthorizationNotConfigured, "authorization denied", "reason", "authorizer_not_configured")
 				writeForbidden(w)
 				return
 			}
 
 			requestInfo, err := parseRequestPath(r.URL.Path)
 			if err != nil {
-				logger.Info("authorization denied for invalid public API path", "method", r.Method, "error", err)
+				requestLogger.Info("authorization denied", "method", r.Method, "reason", authorizationReasonInvalidPath)
 				writeForbidden(w)
 				return
 			}
 			if requestInfo.namespace == "" {
 				// Do not return resources across namespaces without an explicit
 				// namespace authorization strategy.
+				requestLogger.Info("authorization denied", "reason", authorizationReasonClusterScopedRequest)
 				writeForbidden(w)
 				return
 			}
 
 			action, err := actionForRequest(r.Method, requestInfo.plural, requestInfo.named)
 			if err != nil {
-				logger.Info("authorization denied for unsupported public API operation", "method", r.Method, "resource", requestInfo.plural)
+				requestLogger.Info("authorization denied", "method", r.Method, "reason", authorizationReasonUnsupportedOperation)
 				writeForbidden(w)
 				return
 			}
 			if r.Method == http.MethodGet && !requestInfo.named {
-				handleListAuthorization(w, r, next, authorizer, logger, email, action, requestInfo)
+				handleListAuthorization(w, r, next, authorizer, requestLogger, email, action, requestInfo)
 				return
 			}
 
-			objectAuthorizer := objectAuthorizer(authorizer, logger, email, action, requestInfo, r.Method)
+			objectAuthorizer := objectAuthorizer(authorizer, requestLogger, email, action, requestInfo, r.Method)
 			ctx := handlers.WithObjectAuthorizer(r.Context(), objectAuthorizer)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -154,7 +181,7 @@ func handleListAuthorization(
 ) {
 	allowed, err := authorizer.HasNamespacePermission(r.Context(), email, action, request.namespace)
 	if err != nil {
-		logger.Error(err, "authorization list permission check failed closed", "resource", request.plural, "namespace", request.namespace)
+		logger.Error(errAuthorizationListPermissionCheck, "authorization denied", "resource", request.plural, "action", string(action), "reason", authorizationReasonListPermissionCheck)
 		writeForbidden(w)
 		return
 	}
@@ -163,44 +190,87 @@ func handleListAuthorization(
 		return
 	}
 
-	ctx := handlers.WithItemFilter(r.Context(), itemFilter(authorizer, logger, email, action, request.plural, r.Method))
+	failures := &listAuthorizationFailures{}
+	ctx := handlers.WithItemFilter(r.Context(), itemFilter(authorizer, email, action, request.plural, r.Method, failures))
 	next.ServeHTTP(w, r.WithContext(ctx))
+	failures.log(logger, request.plural, action)
 }
 
-func itemFilter(authorizer *Authorizer, logger logr.Logger, email string, action Action, resourcePlural, method string) storage.ItemFilter {
+func itemFilter(authorizer *Authorizer, email string, action Action, resourcePlural, method string, failures *listAuthorizationFailures) storage.ItemFilter {
 	return func(ctx context.Context, object client.Object) (bool, error) {
-		if object == nil || object.GetNamespace() == "" {
+		switch authorizeListItem(ctx, authorizer, email, action, resourcePlural, method, object) {
+		case listItemAuthorizationAllowed:
+			return true, nil
+		case listItemAuthorizationContextBuildFailed:
+			failures.contextBuild.Add(1)
+			return false, nil
+		case listItemAuthorizationPolicyEvaluationFailed:
+			failures.policyEvaluation.Add(1)
+			return false, nil
+		default:
 			return false, nil
 		}
-		requestContext, err := CedarContextForObject(object, resourcePlural, method)
-		if err != nil {
-			logger.Error(err, "authorization item context could not be built", "resource", resourcePlural, "namespace", object.GetNamespace(), "name", object.GetName())
-			return false, nil
-		}
-		allowed, err := authorizer.AuthorizeWithContext(ctx, email, action, object.GetNamespace(), requestContext)
-		if err != nil {
-			logger.Error(err, "authorization item evaluation failed closed", "resource", resourcePlural, "namespace", object.GetNamespace(), "name", object.GetName())
-			return false, nil
-		}
-		return allowed, nil
 	}
+}
+
+type listItemAuthorizationOutcome int
+
+const (
+	listItemAuthorizationDenied listItemAuthorizationOutcome = iota
+	listItemAuthorizationAllowed
+	listItemAuthorizationContextBuildFailed
+	listItemAuthorizationPolicyEvaluationFailed
+)
+
+func authorizeListItem(ctx context.Context, authorizer *Authorizer, email string, action Action, resourcePlural, method string, object client.Object) listItemAuthorizationOutcome {
+	if object == nil || object.GetNamespace() == "" {
+		return listItemAuthorizationContextBuildFailed
+	}
+	requestContext, err := CedarContextForObject(object, resourcePlural, method)
+	if err != nil {
+		return listItemAuthorizationContextBuildFailed
+	}
+	allowed, err := authorizer.AuthorizeWithContext(ctx, email, action, object.GetNamespace(), requestContext)
+	if err != nil {
+		return listItemAuthorizationPolicyEvaluationFailed
+	}
+	if allowed {
+		return listItemAuthorizationAllowed
+	}
+	return listItemAuthorizationDenied
 }
 
 func objectAuthorizer(authorizer *Authorizer, logger logr.Logger, email string, action Action, request parsedRequest, method string) handlers.ObjectAuthorizer {
 	return func(ctx context.Context, object client.Object) (bool, error) {
 		if object == nil || object.GetNamespace() != request.namespace {
-			return false, fmt.Errorf("authorization object namespace does not match request")
+			logger.Error(errAuthorizationObjectNamespaceMatch, "authorization denied", "resource", request.plural, "action", string(action), "reason", authorizationReasonObjectNamespaceMismatch)
+			return false, errAuthorizationObjectNamespaceMatch
 		}
 		requestContext, err := CedarContextForObject(object, request.plural, method)
 		if err != nil {
-			return false, err
+			logger.Error(errAuthorizationObjectContextBuild, "authorization denied", "resource", request.plural, "action", string(action), "reason", authorizationReasonObjectContextBuild)
+			return false, errAuthorizationObjectContextBuild
 		}
 		allowed, err := authorizer.AuthorizeWithContext(ctx, email, action, request.namespace, requestContext)
 		if err != nil {
-			logger.Error(err, "authorization evaluation failed closed", "resource", request.plural, "namespace", request.namespace)
-			return false, err
+			logger.Error(errAuthorizationPolicyEvaluation, "authorization denied", "resource", request.plural, "action", string(action), "reason", authorizationReasonPolicyEvaluation)
+			return false, errAuthorizationPolicyEvaluation
 		}
 		return allowed, nil
+	}
+}
+
+type listAuthorizationFailures struct {
+	contextBuild     atomic.Int64
+	policyEvaluation atomic.Int64
+}
+
+func (f *listAuthorizationFailures) log(logger logr.Logger, resourcePlural string, action Action) {
+	if count := f.contextBuild.Load(); count > 0 {
+		logger.Error(errAuthorizationObjectContextBuild, "authorization list item evaluation failed", "resource", resourcePlural, "action", string(action), "reason", authorizationReasonObjectContextBuild, "failureCount", count)
+	}
+	if count := f.policyEvaluation.Load(); count > 0 {
+		logger.Error(errAuthorizationPolicyEvaluation, "authorization list item evaluation failed", "resource", resourcePlural, "action", string(action), "reason", authorizationReasonPolicyEvaluation, "failureCount", count)
 	}
 }
 
