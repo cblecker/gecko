@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -181,6 +184,9 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 
 	// Set GVK on public object
 	publicObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, publicObj.(client.Object)) {
+		return
+	}
 
 	// Convert public to private (no existing object)
 	privateObjRaw, err := h.privateScheme.New(h.gvk)
@@ -222,7 +228,6 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-
 	// Set GVK on private object for storage
 	privateObj.GetObjectKind().SetGroupVersionKind(h.gvk)
 
@@ -241,7 +246,7 @@ func (h *ConvertingResourceHandler) Create(w http.ResponseWriter, r *http.Reques
 	h.logger.Info("Created (converting)", "kind", h.gvk.Kind, "namespace", namespace, "name", name)
 
 	// Convert stored private object back to public to get ResourceVersion
-	responsePublic, err := h.converter.PrivateToPublic(privateObj)
+	responsePublic, err := h.convertToPublicObject(privateObj)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to public: %v", err))
 		return
@@ -275,11 +280,18 @@ func (h *ConvertingResourceHandler) Get(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-
 	// Convert to public
-	publicObj, err := h.converter.PrivateToPublic(privateObj)
+	publicObj, err := h.convertToPublicObject(privateObj)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to public: %v", err))
+		return
+	}
+	publicClientObj, ok := publicObj.(client.Object)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "public object does not implement client.Object")
+		return
+	}
+	if !authorizeRequestObject(w, r, publicClientObj) {
 		return
 	}
 
@@ -293,31 +305,18 @@ func (h *ConvertingResourceHandler) Get(w http.ResponseWriter, r *http.Request) 
 // List handles GET requests to list resources.
 func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, constants.URLParamNamespace)
-	if namespace == "" {
-		h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "scope", "cluster")
-	} else {
-		h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "namespace", namespace)
-	}
+	h.logListRequest(namespace)
 
-	// Build list options from query parameters
-	opts := storage.ListOptions{
-		Namespace: namespace,
+	opts, err := h.listOptions(r, namespace)
+	if err != nil {
+		h.logger.V(1).Info("Invalid list options", "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-
-	// Parse label selector from query parameter
-	if labelSelectorStr := r.URL.Query().Get(constants.QueryParamLabelSelector); labelSelectorStr != "" {
-		opts.LabelSelector = labelSelectorStr
-	}
-
-	applyParentFilterToListOpts(r.Context(), &opts)
 
 	// Check if this is a watch request
 	if r.URL.Query().Get(constants.QueryParamWatch) == "true" {
-		if namespace == "" {
-			h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "scope", "cluster", "uri", r.RequestURI)
-		} else {
-			h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "namespace", namespace, "uri", r.RequestURI)
-		}
+		h.logWatchRequest(namespace, r.RequestURI)
 		h.handleWatch(w, r, opts)
 		return
 	}
@@ -325,115 +324,195 @@ func (h *ConvertingResourceHandler) List(w http.ResponseWriter, r *http.Request)
 	// Get private objects list from storage
 	privateList, err := h.store.List(r.Context(), opts)
 	if err != nil {
-		if namespace == "" {
-			h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "scope", "cluster")
-		} else {
-			h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "namespace", namespace)
-		}
+		h.logListError(err, namespace)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list objects: %v", err))
 		return
 	}
 
-	// Extract items from the list using meta.ExtractList
-	privateItems, err := meta.ExtractList(privateList)
+	publicObjects, err := h.publicListObjects(privateList)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to extract list items: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Convert each private object to public
+	if h.writeTableList(w, r, privateList, publicObjects, namespace) {
+		return
+	}
+	h.writeJSONList(w, privateList, publicObjects, namespace)
+}
+
+func (h *ConvertingResourceHandler) listOptions(r *http.Request, namespace string) (storage.ListOptions, error) {
+	opts := storage.ListOptions{Namespace: namespace}
+	if filter, ok := ItemFilterFromContext(r.Context()); ok {
+		opts.ItemFilter = h.publicItemFilter(filter)
+	}
+
+	if labelSelector := r.URL.Query().Get(constants.QueryParamLabelSelector); labelSelector != "" {
+		if _, err := labels.Parse(labelSelector); err != nil {
+			return storage.ListOptions{}, fmt.Errorf("invalid label selector: %w", err)
+		}
+		opts.LabelSelector = labelSelector
+	}
+	shardSelector, err := storage.ParseShardSelector(
+		r.URL.Query().Get(constants.QueryParamShardIndex),
+		r.URL.Query().Get(constants.QueryParamShardCount),
+	)
+	if err != nil {
+		return storage.ListOptions{}, fmt.Errorf("invalid shard selector: %w", err)
+	}
+	opts.ShardSelector = shardSelector
+	applyParentFilterToListOpts(r.Context(), &opts)
+
+	if limitString := r.URL.Query().Get(constants.QueryParamLimit); limitString != "" {
+		limit, err := strconv.ParseInt(limitString, 10, 64)
+		if err != nil || limit < 0 {
+			return storage.ListOptions{}, fmt.Errorf("invalid limit parameter")
+		}
+		opts.Limit = limit
+	}
+	opts.Continue = r.URL.Query().Get(constants.QueryParamContinue)
+	return opts, nil
+}
+
+func (h *ConvertingResourceHandler) publicItemFilter(filter storage.ItemFilter) storage.ItemFilter {
+	return func(ctx context.Context, privateObj client.Object) (bool, error) {
+		publicObj, err := h.convertToPublicObject(privateObj)
+		if err != nil {
+			return false, fmt.Errorf("convert object for item authorization: %w", err)
+		}
+		publicClientObj, ok := publicObj.(client.Object)
+		if !ok {
+			return false, fmt.Errorf("public object does not implement client.Object")
+		}
+		return filter(ctx, publicClientObj)
+	}
+}
+
+func (h *ConvertingResourceHandler) publicListObjects(privateList client.ObjectList) ([]runtime.Object, error) {
+	privateItems, err := meta.ExtractList(privateList)
+	if err != nil {
+		return nil, fmt.Errorf("extract list items: %w", err)
+	}
 	publicObjects := make([]runtime.Object, 0, len(privateItems))
 	for _, privateObj := range privateItems {
-		publicObj, err := h.converter.PrivateToPublic(privateObj)
+		publicObj, err := h.convertToPublicObject(privateObj)
 		if err != nil {
-			continue // Skip objects that fail conversion
+			continue
 		}
 		publicObjects = append(publicObjects, publicObj)
 	}
+	return publicObjects, nil
+}
 
-	// Check if client wants Table format (kubectl does)
-	// Accept header may contain multiple media types with parameters like:
-	// "application/json;as=Table;v=v1;g=meta.k8s.io,application/json"
-	wantsTable := false
-	acceptHeader := r.Header.Get("Accept")
-	for _, part := range strings.Split(acceptHeader, ",") {
+func (h *ConvertingResourceHandler) writeTableList(w http.ResponseWriter, r *http.Request, privateList client.ObjectList, publicObjects []runtime.Object, namespace string) bool {
+	if !requestsTable(r) || len(h.printerColumns) == 0 {
+		return false
+	}
+
+	gr := runtimeschema.GroupResource{Group: h.gvk.Group, Resource: h.resourceType}
+	convertor := aggregated.NewCustomTableConvertor(gr, h.printerColumns)
+	unstructuredList := &unstructured.UnstructuredList{}
+	unstructuredList.SetAPIVersion(h.gvk.GroupVersion().String())
+	unstructuredList.SetKind(h.gvk.Kind + "List")
+	unstructuredList.SetResourceVersion(privateList.GetResourceVersion())
+	if listMeta, err := meta.ListAccessor(privateList); err == nil {
+		unstructuredList.SetContinue(listMeta.GetContinue())
+		unstructuredList.SetRemainingItemCount(listMeta.GetRemainingItemCount())
+	}
+	for _, obj := range publicObjects {
+		unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+		if err != nil {
+			h.logger.V(1).Info("Failed to convert object to unstructured for table", "error", err)
+			continue
+		}
+		unstructuredList.Items = append(unstructuredList.Items, unstructured.Unstructured{Object: unstructuredObj})
+	}
+	table, err := convertor.ConvertToTable(r.Context(), unstructuredList, nil)
+	if err != nil {
+		h.logger.Error(err, "Table conversion failed", "kind", h.gvk.Kind)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to table: %v", err))
+		return true
+	}
+	h.logListed(namespace, len(publicObjects), "Listed as Table (converting)")
+	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(table); err != nil {
+		h.logger.Error(err, "Failed to encode Table response", "kind", h.gvk.Kind)
+	}
+	return true
+}
+
+func requestsTable(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
 		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
 		if err != nil {
 			continue
 		}
-		if mediaType == "application/json" && params["as"] == "Table" {
-			// Check quality value - q=0 means "not acceptable"
-			if q := params["q"]; q != "" && q == "0" {
-				continue
-			}
-			wantsTable = true
-			break
+		if mediaType == "application/json" && params["as"] == "Table" && params["q"] != "0" {
+			return true
 		}
 	}
+	return false
+}
 
-	if wantsTable && h.printerColumns != nil && len(h.printerColumns) > 0 {
-		// Convert to Table format using CustomTableConvertor
-		gr := runtimeschema.GroupResource{Group: h.gvk.Group, Resource: h.resourceType}
-		convertor := aggregated.NewCustomTableConvertor(gr, h.printerColumns)
-
-		// Convert list to unstructured for table conversion
-		unstructuredList := &unstructured.UnstructuredList{}
-		unstructuredList.SetAPIVersion(h.gvk.GroupVersion().String())
-		unstructuredList.SetKind(h.gvk.Kind + "List")
-		unstructuredList.SetResourceVersion(privateList.GetResourceVersion())
-
-		// Convert public objects to unstructured items
-		for _, obj := range publicObjects {
-			unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-			if err != nil {
-				h.logger.V(1).Info("Failed to convert object to unstructured for table", "error", err)
-				continue
-			}
-			unstructuredList.Items = append(unstructuredList.Items, unstructured.Unstructured{Object: unstructuredObj})
-		}
-
-		// ConvertToTable with nil opts uses default table conversion options
-		table, err := convertor.ConvertToTable(r.Context(), unstructuredList, nil)
-		if err != nil {
-			h.logger.Error(err, "Table conversion failed", "kind", h.gvk.Kind)
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert to table: %v", err))
-			return
-		}
-
-		if namespace == "" {
-			h.logger.V(1).Info("Listed as Table (converting)", "kind", h.gvk.Kind, "scope", "cluster", "count", len(publicObjects))
-		} else {
-			h.logger.V(1).Info("Listed as Table (converting)", "kind", h.gvk.Kind, "namespace", namespace, "count", len(publicObjects))
-		}
-
-		w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(table); err != nil {
-			h.logger.Error(err, "Failed to encode Table response", "kind", h.gvk.Kind)
-		}
-		return
-	}
-
-	// Build list response manually as JSON to avoid type conversion issues
-	// meta.SetList() requires exact type matches which don't work across packages
+func (h *ConvertingResourceHandler) writeJSONList(w http.ResponseWriter, privateList client.ObjectList, publicObjects []runtime.Object, namespace string) {
 	listResponse := map[string]interface{}{
-		"apiVersion": h.gvk.GroupVersion().String(),
-		"kind":       h.gvk.Kind + "List",
-		constants.FieldMetadata: map[string]interface{}{
-			"resourceVersion": privateList.GetResourceVersion(),
-		},
-		"items": publicObjects,
+		"apiVersion":            h.gvk.GroupVersion().String(),
+		"kind":                  h.gvk.Kind + "List",
+		constants.FieldMetadata: listMetadata(privateList),
+		"items":                 publicObjects,
 	}
-
-	if namespace == "" {
-		h.logger.V(1).Info("Listed (converting)", "kind", h.gvk.Kind, "scope", "cluster", "count", len(publicObjects))
-	} else {
-		h.logger.V(1).Info("Listed (converting)", "kind", h.gvk.Kind, "namespace", namespace, "count", len(publicObjects))
-	}
-
+	h.logListed(namespace, len(publicObjects), "Listed (converting)")
 	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(listResponse)
+	_ = json.NewEncoder(w).Encode(listResponse)
+}
+
+func listMetadata(list client.ObjectList) map[string]interface{} {
+	metadata := map[string]interface{}{"resourceVersion": list.GetResourceVersion()}
+	listMeta, err := meta.ListAccessor(list)
+	if err != nil {
+		return metadata
+	}
+	if continueToken := listMeta.GetContinue(); continueToken != "" {
+		metadata["continue"] = continueToken
+	}
+	if remainingItemCount := listMeta.GetRemainingItemCount(); remainingItemCount != nil {
+		metadata["remainingItemCount"] = *remainingItemCount
+	}
+	return metadata
+}
+
+func (h *ConvertingResourceHandler) logListRequest(namespace string) {
+	if namespace == "" {
+		h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "scope", "cluster")
+		return
+	}
+	h.logger.V(1).Info("List request (converting)", "kind", h.gvk.Kind, "namespace", namespace)
+}
+
+func (h *ConvertingResourceHandler) logWatchRequest(namespace, uri string) {
+	if namespace == "" {
+		h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "scope", "cluster", "uri", uri)
+		return
+	}
+	h.logger.V(1).Info("Watch request (converting)", "kind", h.gvk.Kind, "namespace", namespace, "uri", uri)
+}
+
+func (h *ConvertingResourceHandler) logListError(err error, namespace string) {
+	if namespace == "" {
+		h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "scope", "cluster")
+		return
+	}
+	h.logger.Error(err, "List failed (converting)", "kind", h.gvk.Kind, "namespace", namespace)
+}
+
+func (h *ConvertingResourceHandler) logListed(namespace string, count int, message string) {
+	if namespace == "" {
+		h.logger.V(1).Info(message, "kind", h.gvk.Kind, "scope", "cluster", "count", count)
+		return
+	}
+	h.logger.V(1).Info(message, "kind", h.gvk.Kind, "namespace", namespace, "count", count)
 }
 
 // handleWatch handles watch requests using streaming JSON.
@@ -476,7 +555,7 @@ func (h *ConvertingResourceHandler) handleWatch(w http.ResponseWriter, r *http.R
 
 	// Create transformer to convert private objects to public
 	transformer := func(obj client.Object) (interface{}, error) {
-		return h.converter.PrivateToPublic(obj)
+		return h.convertToPublicObject(obj)
 	}
 
 	// Stream watch events with transformation
@@ -504,6 +583,14 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	existingPublic, err := h.convertToPublicClientObject(existingPrivate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert existing object for authorization: %v", err))
+		return
+	}
+	if !authorizeRequestObject(w, r, existingPublic) {
+		return
+	}
 
 	// Parse request body
 	var objMap map[string]interface{}
@@ -521,15 +608,7 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 
 	// Build an old-object map using the public representation so that it
 	// matches the schema of objMap (which is the incoming public request).
-	// Set the GVK on the stored object first: stores may return unstructured
-	// objects without a GVK set, which would cause PrivateToPublic to fail.
-	existingPrivate.GetObjectKind().SetGroupVersionKind(h.gvk)
-	existingPublicForCEL, err := h.converter.PrivateToPublic(existingPrivate)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert old object to public: %v", err))
-		return
-	}
-	existingJSONForCEL, err := json.Marshal(existingPublicForCEL)
+	existingJSONForCEL, err := json.Marshal(existingPublic)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshaling old object: %v", err))
 		return
@@ -578,6 +657,10 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid metadata: %v", err))
 		return
 	}
+	publicObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	if !authorizeRequestObject(w, r, publicObj.(client.Object)) {
+		return
+	}
 
 	// Convert public to private, preserving internal fields
 	privateObj, err := h.converter.PublicToPrivate(publicObj, existingPrivate)
@@ -620,7 +703,6 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-
 	// Check if spec changed and increment generation if so.
 	//
 	// Compare against a copy of existingPrivate normalized the same way as
@@ -660,7 +742,7 @@ func (h *ConvertingResourceHandler) Update(w http.ResponseWriter, r *http.Reques
 	h.logger.Info("Updated (converting)", "kind", h.gvk.Kind, "namespace", namespace, "name", name)
 
 	// Convert back to public for response
-	responsePublic, err := h.converter.PrivateToPublic(privateObj)
+	responsePublic, err := h.convertToPublicObject(privateObj)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert response: %v", err))
 		return
@@ -676,6 +758,7 @@ type patchInput struct {
 	objMap          map[string]interface{}
 	oldObjMap       map[string]interface{}
 	existingPrivate client.Object
+	existingPublic  client.Object
 }
 
 // Patch handles PATCH requests to partially update a resource.
@@ -690,6 +773,9 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 		writeError(w, httpStatus, err.Error())
 		return
 	}
+	if !authorizeRequestObject(w, r, input.existingPublic) {
+		return
+	}
 
 	if h.processor == nil {
 		writeError(w, http.StatusInternalServerError, "schema processor not configured")
@@ -700,13 +786,26 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	privateObj, httpStatus, err := h.convertPatchToPrivate(r, namespace, name, input)
+	publicObj, httpStatus, err := h.patchPublicObject(namespace, name, input)
 	if err != nil {
 		writeError(w, httpStatus, err.Error())
 		return
 	}
+	if !authorizeRequestObject(w, r, publicObj) {
+		return
+	}
+	privateObj, httpStatus, err := h.convertPatchToPrivate(r, input, publicObj)
+	if err != nil {
+		writeError(w, httpStatus, err.Error())
+		return
+	}
+	privateClientObj, ok := privateObj.(client.Object)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "patched object does not implement client.Object")
+		return
+	}
 
-	if err := h.store.Update(r.Context(), privateObj.(client.Object)); err != nil {
+	if err := h.store.Update(r.Context(), privateClientObj); err != nil {
 		h.logger.V(1).Info("[PATCH-CONVERTING] %s namespace=%s name=%s error=%v", h.gvk.Kind, namespace, name, err)
 		if errors.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -720,7 +819,7 @@ func (h *ConvertingResourceHandler) Patch(w http.ResponseWriter, r *http.Request
 
 	h.logger.V(1).Info("[PATCH-CONVERTING] %s namespace=%s name=%s status=patched", h.gvk.Kind, namespace, name)
 
-	responsePublic, err := h.converter.PrivateToPublic(privateObj)
+	responsePublic, err := h.convertToPublicObject(privateObj)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert response: %v", err))
 		return
@@ -747,7 +846,7 @@ func (h *ConvertingResourceHandler) preparePatch(r *http.Request, namespace, nam
 		return patchInput{}, http.StatusNotFound, fmt.Errorf("not found")
 	}
 
-	existingPublic, err := h.converter.PrivateToPublic(existingPrivate)
+	existingPublic, err := h.convertToPublicClientObject(existingPrivate)
 	if err != nil {
 		return patchInput{}, http.StatusInternalServerError, fmt.Errorf("failed to convert to public: %w", err)
 	}
@@ -792,14 +891,31 @@ func (h *ConvertingResourceHandler) preparePatch(r *http.Request, namespace, nam
 		objMap:          objMap,
 		oldObjMap:       oldObjMap,
 		existingPrivate: existingPrivate,
+		existingPublic:  existingPublic,
 	}, http.StatusOK, nil
 }
 
-// convertPatchToPrivate converts the validated, merged public object map into
-// a private runtime.Object ready for storage, running custom defaulting and
-// validation, preserving server-managed metadata, and computing the new
-// generation.
-func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, namespace, name string, input patchInput) (runtime.Object, int, error) {
+func (h *ConvertingResourceHandler) convertToPublicObject(privateObj runtime.Object) (runtime.Object, error) {
+	privateCopy := privateObj.DeepCopyObject()
+	privateCopy.GetObjectKind().SetGroupVersionKind(h.gvk)
+	return h.converter.PrivateToPublic(privateCopy)
+}
+
+func (h *ConvertingResourceHandler) convertToPublicClientObject(privateObj client.Object) (client.Object, error) {
+	publicObj, err := h.convertToPublicObject(privateObj)
+	if err != nil {
+		return nil, err
+	}
+	publicClientObj, ok := publicObj.(client.Object)
+	if !ok {
+		return nil, fmt.Errorf("public object does not implement client.Object")
+	}
+	return publicClientObj, nil
+}
+
+// patchPublicObject converts the validated, merged public object map into its
+// typed public representation with server-controlled identity restored.
+func (h *ConvertingResourceHandler) patchPublicObject(namespace, name string, input patchInput) (client.Object, int, error) {
 	objJSON, _ := json.Marshal(input.objMap)
 	publicObj, err := h.publicScheme.New(h.gvk)
 	if err != nil {
@@ -819,6 +935,18 @@ func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, names
 	if err := validateMetadata(accessor); err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("invalid metadata: %w", err)
 	}
+	publicObj.GetObjectKind().SetGroupVersionKind(h.gvk)
+	clientObj, ok := publicObj.(client.Object)
+	if !ok {
+		return nil, http.StatusInternalServerError, fmt.Errorf("public object does not implement client.Object")
+	}
+	return clientObj, http.StatusOK, nil
+}
+
+// convertPatchToPrivate converts the effective public object into a private
+// runtime.Object ready for storage, running custom defaulting and validation,
+// preserving server-managed metadata, and computing the new generation.
+func (h *ConvertingResourceHandler) convertPatchToPrivate(r *http.Request, input patchInput, publicObj client.Object) (runtime.Object, int, error) {
 
 	privateObj, err := h.converter.PublicToPrivate(publicObj, input.existingPrivate)
 	if err != nil {
@@ -895,6 +1023,19 @@ func (h *ConvertingResourceHandler) Delete(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	authorizationPublic, err := h.convertToPublicObject(existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert object for authorization: %v", err))
+		return
+	}
+	publicClientObj, ok := authorizationPublic.(client.Object)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "public object does not implement client.Object")
+		return
+	}
+	if !authorizeRequestObject(w, r, publicClientObj) {
+		return
+	}
 
 	if v, ok := existing.(types.CustomValidator); ok {
 		if err := v.ValidateDelete(r.Context()); err != nil {
@@ -936,7 +1077,7 @@ func (h *ConvertingResourceHandler) Delete(w http.ResponseWriter, r *http.Reques
 			h.logger.Info("Marked for deletion (finalizers present)", "kind", h.gvk.Kind, "namespace", namespace, "name", name, "finalizers", finalizers)
 
 			// Convert to public API for response
-			responsePublic, err := h.converter.PrivateToPublic(toStore)
+			responsePublic, err := h.convertToPublicObject(toStore)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert response: %v", err))
 				return
@@ -951,7 +1092,7 @@ func (h *ConvertingResourceHandler) Delete(w http.ResponseWriter, r *http.Reques
 		// Already marked for deletion - return object idempotently
 		h.logger.V(1).Info("Already marked for deletion", "kind", h.gvk.Kind, "namespace", namespace, "name", name, "finalizers", finalizers)
 
-		responsePublic, err := h.converter.PrivateToPublic(existing)
+		responsePublic, err := h.convertToPublicObject(existing)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to convert response: %v", err))
 			return

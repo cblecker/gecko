@@ -3,7 +3,10 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 )
 
 func TestCORS(t *testing.T) {
@@ -89,6 +92,19 @@ func TestCORS(t *testing.T) {
 
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", rr.Code)
+		}
+	})
+
+	t.Run("exposes request ID", func(t *testing.T) {
+		handler := CORS(CORSOptions{})(dummyHandler)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.Header.Set("Origin", "https://example.com")
+		rr := httptest.NewRecorder()
+
+		handler.ServeHTTP(rr, req)
+		if exposed := rr.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(strings.ToLower(exposed), strings.ToLower(constants.HeaderRequestID)) {
+			t.Fatalf("Access-Control-Expose-Headers = %q, want %q", exposed, constants.HeaderRequestID)
 		}
 	})
 }

@@ -14,6 +14,8 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // writeError writes an error response with a Status object.
@@ -31,6 +33,18 @@ func writeError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(status)
+}
+
+// authorizeRequestObject applies an optional request-scoped object authorizer.
+// Errors deny the request so a failure to build or evaluate authorization state
+// can never expose or mutate an object.
+func authorizeRequestObject(w http.ResponseWriter, r *http.Request, obj client.Object) bool {
+	allowed, err := authorizeObject(r.Context(), obj)
+	if err == nil && allowed {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "forbidden")
+	return false
 }
 
 // specChanged checks if the spec field has changed between two objects.

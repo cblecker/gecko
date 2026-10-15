@@ -6,6 +6,7 @@ require (
 	github.com/cedar-policy/cedar-go v1.8.0
 	github.com/go-logr/logr v1.4.4
 	github.com/go-logr/stdr v1.2.2
+	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
 	github.com/open-feature/go-sdk v1.19.0
 	github.com/open-feature/go-sdk-contrib/providers/flagd v0.7.1
@@ -75,7 +76,6 @@ require (
 	github.com/google/cel-go v0.31.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.23 // indirect
 	github.com/googleapis/gax-go/v2 v2.26.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus v1.1.1 // indirect

@@ -95,15 +95,21 @@ func policyForBinding(binding privatev1.RoleBinding, permissions []string) (*ced
 	sort.Strings(actions)
 
 	roleID := fmt.Sprintf("%s/%s/%s", binding.Namespace, binding.Spec.RoleRef.Name, binding.Name)
+	conditions := []string{
+		fmt.Sprintf("principal in NamespaceRole::%s", strconv.Quote(roleID)),
+		fmt.Sprintf("resource in Namespace::%s", strconv.Quote(binding.Namespace)),
+	}
+	if binding.Spec.Condition != nil && strings.TrimSpace(*binding.Spec.Condition) != "" {
+		conditions = append(conditions, "("+*binding.Spec.Condition+")")
+	}
 	policyText := fmt.Sprintf(`permit (
     principal,
     action in [%s],
     resource
 )
 when {
-    principal in NamespaceRole::%s &&
-    resource in Namespace::%s
-};`, strings.Join(actions, ", "), strconv.Quote(roleID), strconv.Quote(binding.Namespace))
+    %s
+};`, strings.Join(actions, ", "), strings.Join(conditions, " &&\n    "))
 
 	var policy cedar.Policy
 	if err := policy.UnmarshalCedar([]byte(policyText)); err != nil {

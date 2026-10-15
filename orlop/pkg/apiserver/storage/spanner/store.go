@@ -300,44 +300,10 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 		return nil, err
 	}
 
-	if opts.Continue != "" {
-		if _, err := storage.DecodeContinueToken(opts.Continue); err != nil {
-			return nil, apierrors.NewResourceExpired("invalid continue token")
-		}
+	stmt, err := s.listStatement(opts, filterValue)
+	if err != nil {
+		return nil, err
 	}
-
-	qb := newQueryBuilder(s.tableName, "namespace", "name", "resource_version", "data")
-	qb.whereResourceType(s.resourceType)
-
-	if s.contextFilterKey != nil {
-		qb.whereContextFilter(filterValue)
-	}
-	qb.whereNamespace(opts.Namespace)
-
-	if opts.LabelSelector != "" {
-		selector, err := labels.Parse(opts.LabelSelector)
-		if err != nil {
-			return nil, err
-		}
-		qb.whereLabelSelector(selector)
-	}
-
-	qb.whereShardSelector(opts.ShardSelector)
-	qb.whereFieldFilters(opts.FieldFilters)
-
-	if opts.Continue != "" {
-		token, _ := storage.DecodeContinueToken(opts.Continue)
-		qb.whereContinueToken(token)
-	}
-
-	qb.setOrderBy("namespace", "name")
-
-	if opts.Limit > 0 {
-		qb.setLimit(opts.Limit + 1)
-	}
-
-	query, params := qb.build()
-	stmt := spanner.Statement{SQL: query, Params: params}
 
 	txn := s.client.ReadOnlyTransaction()
 	defer txn.Close()
@@ -346,7 +312,7 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 	defer iter.Stop()
 
 	var items []client.Object
-	rowCount := int64(0)
+	var hasMore bool
 
 	for {
 		row, err := iter.Next()
@@ -355,12 +321,6 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate rows: %w", err)
-		}
-
-		rowCount++
-
-		if opts.Limit > 0 && rowCount > opts.Limit {
-			break
 		}
 
 		var namespace, name string
@@ -383,6 +343,19 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 		obj, err := s.unmarshalTyped(dataBytes, rv)
 		if err != nil {
 			return nil, err
+		}
+
+		allowed, err := storage.FilterItem(ctx, opts.ItemFilter, obj)
+		if err != nil {
+			return nil, fmt.Errorf("filter list item: %w", err)
+		}
+		if !allowed {
+			continue
+		}
+
+		if opts.Limit > 0 && int64(len(items)) >= opts.Limit {
+			hasMore = true
+			break
 		}
 
 		items = append(items, obj)
@@ -428,7 +401,6 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 		}
 	}
 
-	hasMore := opts.Limit > 0 && rowCount > opts.Limit
 	if hasMore && len(items) > 0 {
 		lastItem := items[len(items)-1]
 		token := &storage.ContinueToken{
@@ -443,6 +415,45 @@ func (s *SpannerStore) List(ctx context.Context, opts storage.ListOptions) (clie
 	}
 
 	return listObj.(client.ObjectList), nil
+}
+
+func (s *SpannerStore) listStatement(opts storage.ListOptions, filterValue string) (spanner.Statement, error) {
+	var continueToken *storage.ContinueToken
+	if opts.Continue != "" {
+		var err error
+		continueToken, err = storage.DecodeContinueToken(opts.Continue)
+		if err != nil {
+			return spanner.Statement{}, apierrors.NewResourceExpired("invalid continue token")
+		}
+	}
+
+	qb := newQueryBuilder(s.tableName, "namespace", "name", "resource_version", "data")
+	qb.whereResourceType(s.resourceType)
+	if s.contextFilterKey != nil {
+		qb.whereContextFilter(filterValue)
+	}
+	qb.whereNamespace(opts.Namespace)
+
+	if opts.LabelSelector != "" {
+		selector, err := labels.Parse(opts.LabelSelector)
+		if err != nil {
+			return spanner.Statement{}, err
+		}
+		qb.whereLabelSelector(selector)
+	}
+	qb.whereShardSelector(opts.ShardSelector)
+	qb.whereFieldFilters(opts.FieldFilters)
+	qb.whereContinueToken(continueToken)
+	qb.setOrderBy("namespace", "name")
+
+	// An item filter must run before the page limit, so fetch candidates until
+	// List has collected one additional visible item. For ordinary lists, keep
+	// the database-side limit for efficiency.
+	if opts.Limit > 0 && opts.ItemFilter == nil {
+		qb.setLimit(opts.Limit + 1)
+	}
+	query, params := qb.build()
+	return spanner.Statement{SQL: query, Params: params}, nil
 }
 
 func (s *SpannerStore) Update(ctx context.Context, obj client.Object) error {
@@ -616,6 +627,11 @@ func (s *SpannerStore) Watch(ctx context.Context, opts storage.ListOptions, reso
 				}
 
 				if len(opts.FieldFilters) > 0 && !matchesFieldFilters(event.Object, opts.FieldFilters) {
+					continue
+				}
+
+				allowed, err := storage.FilterItem(ctx, opts.ItemFilter, event.Object)
+				if err != nil || !allowed {
 					continue
 				}
 

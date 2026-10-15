@@ -52,8 +52,15 @@ func (a *Authorizer) Reload(ctx context.Context) error {
 	return nil
 }
 
-// Authorize evaluates one namespace-scoped public API request.
+// Authorize evaluates one namespace-scoped public API request without
+// object-specific Cedar context.
 func (a *Authorizer) Authorize(ctx context.Context, email string, action Action, namespace string) (bool, error) {
+	return a.AuthorizeWithContext(ctx, email, action, namespace, cedar.NewRecord(nil))
+}
+
+// AuthorizeWithContext evaluates one namespace-scoped public API request with
+// the supplied effective object state.
+func (a *Authorizer) AuthorizeWithContext(ctx context.Context, email string, action Action, namespace string, requestContext cedar.Record) (bool, error) {
 	if email == "" {
 		return false, fmt.Errorf("principal is empty")
 	}
@@ -68,13 +75,23 @@ func (a *Authorizer) Authorize(ctx context.Context, email string, action Action,
 	if policies == nil {
 		return false, nil
 	}
-	decision, _ := cedar.Authorize(policies, entities, cedar.Request{
+	decision, diagnostic := cedar.Authorize(policies, entities, cedar.Request{
 		Principal: cedar.NewEntityUID("User", cedar.String(email)),
 		Action:    cedar.NewEntityUID("Action", cedar.String(action)),
 		Resource:  cedar.NewEntityUID("Namespace", cedar.String(namespace)),
-		Context:   cedar.NewRecord(nil),
+		Context:   requestContext,
 	})
-	return decision == cedar.Allow, nil
+	if decision == cedar.Allow {
+		if len(diagnostic.Errors) > 0 {
+			a.logger.Info("cedar policy evaluation reported diagnostics for non-authorizing bindings", "diagnosticCount", len(diagnostic.Errors))
+		}
+		return true, nil
+	}
+	if len(diagnostic.Errors) > 0 {
+		a.logger.Error(fmt.Errorf("cedar policy evaluation failed"), "authorization denied after cedar policy evaluation errors", "diagnosticCount", len(diagnostic.Errors))
+		return false, fmt.Errorf("cedar evaluation failed")
+	}
+	return false, nil
 }
 
 // Stores returns the stores used by the authorizer. It is primarily useful

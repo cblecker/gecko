@@ -23,6 +23,24 @@ type ListOptions struct {
 	// FieldFilters specifies field-based filtering. Keys are dot-separated
 	// JSON paths (e.g., "spec.clusterID"), values are expected string values.
 	FieldFilters map[string]string
+
+	// ItemFilter is applied after storage-native filters and before pagination.
+	// Returning false omits an item. Implementations must apply it before Limit
+	// and Continue accounting so filtered lists retain correct pagination
+	// semantics.
+	ItemFilter ItemFilter
+}
+
+// ItemFilter decides whether an object belongs in a list result.
+type ItemFilter func(context.Context, client.Object) (bool, error)
+
+// FilterItem applies filter when it is configured. A nil filter accepts every
+// object.
+func FilterItem(ctx context.Context, filter ItemFilter, object client.Object) (bool, error) {
+	if filter == nil {
+		return true, nil
+	}
+	return filter(ctx, object)
 }
 
 // ShardSelector represents a shard selection for list/watch operations.
@@ -50,6 +68,7 @@ type ResourceStore interface {
 	// - Namespace filtering
 	// - Label selector filtering
 	// - Shard-based filtering (if ShardSelector provided)
+	// - ItemFilter evaluation before pagination
 	List(ctx context.Context, opts ListOptions) (client.ObjectList, error)
 
 	// Update updates an existing resource.
@@ -64,5 +83,6 @@ type ResourceStore interface {
 	// - Namespace (if specified in opts)
 	// - Label selector (if specified in opts)
 	// - Shard (if ShardSelector provided in opts)
+	// - ItemFilter (if specified in opts)
 	Watch(ctx context.Context, opts ListOptions, resourceVersion string) (<-chan ResourceEvent, func(), error)
 }
