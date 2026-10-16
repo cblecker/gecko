@@ -413,6 +413,45 @@ func TestGeneratePolicySetSkipsDanglingBinding(t *testing.T) {
 	}
 }
 
+func TestGeneratePolicySetSkipsMalformedConditionWithoutBlockingValidBindings(t *testing.T) {
+	stores, authorizer := newTestAuthorizer(t)
+	seedClusterGetBinding(t, stores, "project-a", nil)
+	if err := authorizer.Reload(context.Background()); err != nil {
+		t.Fatalf("initial policy reload: %v", err)
+	}
+
+	malformedCondition := `true }; forbid (principal, action, resource) when { true`
+	malformedBinding := &privatev1.RoleBinding{
+		Spec: privatev1.RoleBindingSpec{
+			Subject:   "bob@example.com",
+			RoleRef:   privatev1.RoleRef{Kind: "PlatformRole", Name: "cluster-viewer", APIGroup: privatev1.GroupVersion.Group},
+			Condition: &malformedCondition,
+		},
+	}
+	malformedBinding.Name = "malformed-condition"
+	malformedBinding.Namespace = "project-a"
+	malformedBinding.SetGroupVersionKind(privatev1.GroupVersion.WithKind("RoleBinding"))
+	if err := stores.RoleBindings.Create(context.Background(), malformedBinding); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := authorizer.Reload(context.Background()); err != nil {
+		t.Fatalf("reload with malformed binding: %v; want valid bindings to remain loadable", err)
+	}
+	allowed, err := authorizer.Authorize(context.Background(), "alice@example.com", GetCluster, "project-a")
+	if err != nil || !allowed {
+		t.Fatalf("valid binding authorization = %t, %v; want allow", allowed, err)
+	}
+	allowed, err = authorizer.Authorize(context.Background(), "bob@example.com", GetCluster, "project-a")
+	if err != nil || allowed {
+		t.Fatalf("malformed binding authorization = %t, %v; want deny", allowed, err)
+	}
+
+	if _, err := NewAuthorizer(context.Background(), stores, logr.Discard()); err != nil {
+		t.Fatalf("startup with malformed stored binding: %v; want invalid binding skipped", err)
+	}
+}
+
 func TestAuthorizerRevokesAccessAfterReferencedRoleDeletion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := privatev1.AddToScheme(scheme); err != nil {

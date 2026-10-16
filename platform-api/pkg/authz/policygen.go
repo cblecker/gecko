@@ -75,7 +75,16 @@ func generatePolicySet(ctx context.Context, stores Stores, logger logr.Logger) (
 		policyID := cedar.PolicyID(bindingPolicyID(binding))
 		policy, err := policyForBinding(binding, permissions)
 		if err != nil {
-			return nil, fmt.Errorf("parse policy %q: %w", policyID, err)
+			// A malformed condition must deny only this binding, not prevent
+			// valid bindings from being loaded or updated.
+			logger.Error(err, "skipping invalid authorization binding policy",
+				"policyID", string(policyID),
+				"namespace", binding.Namespace,
+				"binding", binding.Name,
+				"roleKind", binding.Spec.RoleRef.Kind,
+				"roleName", binding.Spec.RoleRef.Name,
+			)
+			continue
 		}
 		policies.Add(policyID, policy)
 	}
@@ -111,11 +120,16 @@ when {
     %s
 };`, strings.Join(actions, ", "), strings.Join(conditions, " &&\n    "))
 
-	var policy cedar.Policy
-	if err := policy.UnmarshalCedar([]byte(policyText)); err != nil {
+	// Require complete consumption of the generated source and exactly one
+	// policy; a single-policy parser can ignore trailing policy statements.
+	var policies cedar.PolicyList
+	if err := policies.UnmarshalCedar([]byte(policyText)); err != nil {
 		return nil, err
 	}
-	return &policy, nil
+	if len(policies) != 1 {
+		return nil, fmt.Errorf("expected exactly one generated Cedar policy, got %d", len(policies))
+	}
+	return policies[0], nil
 }
 
 func permissionsForBinding(binding privatev1.RoleBinding, roles map[string]privatev1.Role, platformRoles map[string]privatev1.PlatformRole) ([]string, error) {
