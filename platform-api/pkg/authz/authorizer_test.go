@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -449,6 +450,47 @@ func TestGeneratePolicySetSkipsMalformedConditionWithoutBlockingValidBindings(t 
 
 	if _, err := NewAuthorizer(context.Background(), stores, logr.Discard()); err != nil {
 		t.Fatalf("startup with malformed stored binding: %v; want invalid binding skipped", err)
+	}
+}
+
+func TestGeneratePolicySetLogsMalformedConditionSafely(t *testing.T) {
+	stores, _ := newTestAuthorizer(t)
+	seedClusterGetBinding(t, stores, "customer-project", nil)
+
+	condition := `true }; forbid (principal, action, resource) when { true`
+	binding := &privatev1.RoleBinding{
+		Spec: privatev1.RoleBindingSpec{
+			Subject:   "customer@example.com",
+			RoleRef:   privatev1.RoleRef{Kind: "PlatformRole", Name: "cluster-viewer", APIGroup: privatev1.GroupVersion.Group},
+			Condition: &condition,
+		},
+	}
+	binding.Name = "customer-binding"
+	binding.Namespace = "customer-project"
+	binding.SetGroupVersionKind(privatev1.GroupVersion.WithKind("RoleBinding"))
+	if err := stores.RoleBindings.Create(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []capturedAuthorizationLog{}
+	logger := logr.FromSlogHandler(&capturedAuthorizationLogHandler{entries: &entries})
+	if _, err := generatePolicySet(context.Background(), stores, logger); err != nil {
+		t.Fatalf("generate policy set: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want one aggregate log", len(entries))
+	}
+	entry := entries[0]
+	if entry.message != "skipped invalid authorization binding policies" {
+		t.Fatalf("log message = %q", entry.message)
+	}
+	if entry.attributes["reason"] != "invalid_binding_policy" || entry.attributes["failureCount"] != "1" {
+		t.Fatalf("log attributes = %v, want sanitized reason and failure count", entry.attributes)
+	}
+	for _, sensitive := range []string{*binding.Spec.Condition, binding.Namespace, binding.Name, binding.Spec.Subject, binding.Spec.RoleRef.Name} {
+		if strings.Contains(entry.String(), sensitive) {
+			t.Errorf("authorization log contains customer-controlled value %q: %s", sensitive, entry)
+		}
 	}
 }
 

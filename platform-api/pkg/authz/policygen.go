@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var errInvalidAuthorizationBindingPolicy = errors.New("authorization binding policy is invalid")
 
 // GeneratePolicySet builds the complete Cedar policy set from the current
 // authorization resources. Each RoleBinding gets its own policy so bindings
@@ -59,6 +62,7 @@ func generatePolicySet(ctx context.Context, stores Stores, logger logr.Logger) (
 	})
 
 	policies := cedar.NewPolicySet()
+	invalidPolicyCount := 0
 	for _, binding := range bindings {
 		permissions, err := permissionsForBinding(binding, rolesByNamespace, platformRolesByName)
 		if err != nil {
@@ -77,16 +81,16 @@ func generatePolicySet(ctx context.Context, stores Stores, logger logr.Logger) (
 		if err != nil {
 			// A malformed condition must deny only this binding, not prevent
 			// valid bindings from being loaded or updated.
-			logger.Error(err, "skipping invalid authorization binding policy",
-				"policyID", string(policyID),
-				"namespace", binding.Namespace,
-				"binding", binding.Name,
-				"roleKind", binding.Spec.RoleRef.Kind,
-				"roleName", binding.Spec.RoleRef.Name,
-			)
+			invalidPolicyCount++
 			continue
 		}
 		policies.Add(policyID, policy)
+	}
+	if invalidPolicyCount > 0 {
+		logger.Error(errInvalidAuthorizationBindingPolicy, "skipped invalid authorization binding policies",
+			"reason", "invalid_binding_policy",
+			"failureCount", invalidPolicyCount,
+		)
 	}
 
 	return policies, nil
