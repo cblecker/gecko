@@ -246,7 +246,7 @@ func validateRoleBindingCondition(condition *string) error {
 		return fmt.Errorf("spec.condition is not a valid Cedar expression: %w", err)
 	}
 	if len(policies) != 1 {
-		return fmt.Errorf("spec.condition must contain exactly one Cedar expression")
+		return fmt.Errorf("spec.condition must be a single Cedar condition expression; trailing Cedar policy statements are not allowed")
 	}
 	if policyReferencesNamespaceEntity(policies[0]) {
 		return fmt.Errorf("spec.condition must not reference Namespace:: entities")

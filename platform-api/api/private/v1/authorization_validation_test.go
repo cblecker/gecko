@@ -23,7 +23,7 @@ func TestRoleBindingConditionValidation(t *testing.T) {
 		{name: "string literal is not an entity reference", condition: &stringLiteral},
 		{name: "invalid syntax", condition: &invalidSyntax, wantErr: "spec.condition is not a valid Cedar expression"},
 		{name: "namespace entity", condition: &namespaceReference, wantErr: "must not reference Namespace:: entities"},
-		{name: "trailing policy", condition: &trailingPolicy, wantErr: "must contain exactly one Cedar expression"},
+		{name: "trailing policy", condition: &trailingPolicy, wantErr: "must be a single Cedar condition expression; trailing Cedar policy statements are not allowed"},
 	}
 
 	for _, tt := range tests {
@@ -57,7 +57,7 @@ func TestRoleBindingConditionValidationOnUpdate(t *testing.T) {
 		{
 			name:    "trailing policy",
 			value:   `true }; forbid (principal, action, resource) when { true`,
-			wantErr: "must contain exactly one Cedar expression",
+			wantErr: "must be a single Cedar condition expression; trailing Cedar policy statements are not allowed",
 		},
 	} {
 		t.Run(condition.name, func(t *testing.T) {
