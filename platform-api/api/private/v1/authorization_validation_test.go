@@ -11,6 +11,7 @@ func TestRoleBindingConditionValidation(t *testing.T) {
 	invalidSyntax := `context.spec.platform.gcp.region ==`
 	namespaceReference := `resource in Namespace::"other"`
 	stringLiteral := `context.resourceName == "Namespace::literal"`
+	trailingPolicy := `true }; forbid (principal, action, resource) when { true`
 
 	tests := []struct {
 		name      string
@@ -22,6 +23,7 @@ func TestRoleBindingConditionValidation(t *testing.T) {
 		{name: "string literal is not an entity reference", condition: &stringLiteral},
 		{name: "invalid syntax", condition: &invalidSyntax, wantErr: "spec.condition is not a valid Cedar expression"},
 		{name: "namespace entity", condition: &namespaceReference, wantErr: "must not reference Namespace:: entities"},
+		{name: "trailing policy", condition: &trailingPolicy, wantErr: "must be a single Cedar condition expression; trailing Cedar policy statements are not allowed"},
 	}
 
 	for _, tt := range tests {
@@ -42,11 +44,29 @@ func TestRoleBindingConditionValidation(t *testing.T) {
 }
 
 func TestRoleBindingConditionValidationOnUpdate(t *testing.T) {
-	invalidSyntax := `context.spec ==`
-	binding := testRoleBinding(&invalidSyntax)
-	err := binding.ValidateUpdate(context.Background(), testRoleBinding(nil))
-	if err == nil || !strings.Contains(err.Error(), "spec.condition is not a valid Cedar expression") {
-		t.Fatalf("ValidateUpdate() error = %v, want invalid condition error", err)
+	for _, condition := range []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{
+			name:    "invalid syntax",
+			value:   `context.spec ==`,
+			wantErr: "spec.condition is not a valid Cedar expression",
+		},
+		{
+			name:    "trailing policy",
+			value:   `true }; forbid (principal, action, resource) when { true`,
+			wantErr: "must be a single Cedar condition expression; trailing Cedar policy statements are not allowed",
+		},
+	} {
+		t.Run(condition.name, func(t *testing.T) {
+			binding := testRoleBinding(&condition.value)
+			err := binding.ValidateUpdate(context.Background(), testRoleBinding(nil))
+			if err == nil || !strings.Contains(err.Error(), condition.wantErr) {
+				t.Fatalf("ValidateUpdate() error = %v, want containing %q", err, condition.wantErr)
+			}
+		})
 	}
 }
 

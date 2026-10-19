@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var errInvalidAuthorizationBindingPolicy = errors.New("authorization binding policy is invalid")
 
 // GeneratePolicySet builds the complete Cedar policy set from the current
 // authorization resources. Each RoleBinding gets its own policy so bindings
@@ -59,6 +62,7 @@ func generatePolicySet(ctx context.Context, stores Stores, logger logr.Logger) (
 	})
 
 	policies := cedar.NewPolicySet()
+	invalidPolicyCount := 0
 	for _, binding := range bindings {
 		permissions, err := permissionsForBinding(binding, rolesByNamespace, platformRolesByName)
 		if err != nil {
@@ -75,9 +79,18 @@ func generatePolicySet(ctx context.Context, stores Stores, logger logr.Logger) (
 		policyID := cedar.PolicyID(bindingPolicyID(binding))
 		policy, err := policyForBinding(binding, permissions)
 		if err != nil {
-			return nil, fmt.Errorf("parse policy %q: %w", policyID, err)
+			// A malformed condition must deny only this binding, not prevent
+			// valid bindings from being loaded or updated.
+			invalidPolicyCount++
+			continue
 		}
 		policies.Add(policyID, policy)
+	}
+	if invalidPolicyCount > 0 {
+		logger.Error(errInvalidAuthorizationBindingPolicy, "skipped invalid authorization binding policies",
+			"reason", "invalid_binding_policy",
+			"failureCount", invalidPolicyCount,
+		)
 	}
 
 	return policies, nil
@@ -111,11 +124,16 @@ when {
     %s
 };`, strings.Join(actions, ", "), strings.Join(conditions, " &&\n    "))
 
-	var policy cedar.Policy
-	if err := policy.UnmarshalCedar([]byte(policyText)); err != nil {
+	// Require complete consumption of the generated source and exactly one
+	// policy; a single-policy parser can ignore trailing policy statements.
+	var policies cedar.PolicyList
+	if err := policies.UnmarshalCedar([]byte(policyText)); err != nil {
 		return nil, err
 	}
-	return &policy, nil
+	if len(policies) != 1 {
+		return nil, fmt.Errorf("expected exactly one generated Cedar policy, got %d", len(policies))
+	}
+	return policies[0], nil
 }
 
 func permissionsForBinding(binding privatev1.RoleBinding, roles map[string]privatev1.Role, platformRoles map[string]privatev1.PlatformRole) ([]string, error) {

@@ -227,6 +227,9 @@ func testRoleBindingObjectState(t *testing.T, server publicAuthorizationTestServ
 		[]byte(`{"metadata":{"name":"invalid-condition"},"spec":{"subject":"bob@example.com","roleRef":`+roleRef+`,"condition":"context.spec =="}}`), constants.ContentTypeJSON, http.StatusBadRequest, "invalid condition create")
 	assertAuthorizationStatus(t, server.request, http.MethodPost, roleBindingPath,
 		[]byte(`{"metadata":{"name":"namespace-reference"},"spec":{"subject":"bob@example.com","roleRef":`+roleRef+`,"condition":"resource in Namespace::\"other\""}}`), constants.ContentTypeJSON, http.StatusBadRequest, "Namespace entity condition create")
+	assertAuthorizationStatus(t, server.request, http.MethodPost, roleBindingPath,
+		[]byte(`{"metadata":{"name":"trailing-policy"},"spec":{"subject":"bob@example.com","roleRef":`+roleRef+`,"condition":"true }; forbid (principal, action, resource) when { true"}}`), constants.ContentTypeJSON, http.StatusBadRequest, "trailing Cedar policy condition create")
+	assertAuthorizationStatus(t, server.request, http.MethodGet, roleBindingPath+"/trailing-policy", nil, "", http.StatusNotFound, "trailing Cedar policy condition not persisted")
 
 	existingPath := roleBindingPath + "/existing-eve"
 	assertAuthorizationStatus(t, server.request, http.MethodGet, existingPath, nil, "", http.StatusForbidden, "stored disallowed get")

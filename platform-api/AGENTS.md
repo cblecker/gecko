@@ -96,6 +96,17 @@ and normal `kubectl` access on the applicable surface.
   private and public registrations, or child resources embedded into Cluster
   responses solely for client convenience.
 
+### Sensitive data in logs
+
+- Treat request inputs and persisted resource data as sensitive when they can
+  reach logs, including paths, query values, body fields, names, namespaces,
+  subjects, and identifiers derived from them.
+- Do not log raw errors when their text may include customer-controlled input or
+  persisted data. Use fixed error categories or reason codes with safe
+  structured attributes; aggregate repeated per-item failures where practical.
+- Add captured-log regression coverage for new error paths that process
+  customer-controlled data.
+
 ## Common pitfalls
 
 1. Editing generated files instead of private API source types.
