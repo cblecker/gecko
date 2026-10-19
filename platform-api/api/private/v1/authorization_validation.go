@@ -245,9 +245,12 @@ func validateRoleBindingCondition(condition *string) error {
 	if err := policies.UnmarshalCedar([]byte(conditionValidationPolicy(*condition))); err != nil {
 		return fmt.Errorf("spec.condition is not a valid Cedar expression: %w", err)
 	}
-	if len(policies) != 1 {
-		return fmt.Errorf("spec.condition must be a single Cedar condition expression; trailing Cedar policy statements are not allowed")
-	}
+    if len(policies) == 0 {
+        return fmt.Errorf("spec.condition did not produce a Cedar policy")
+    }
+    if len(policies) > 1 {
+        return fmt.Errorf("spec.condition must be a single Cedar condition expression; trailing Cedar policy statements are not allowed")
+    }
 	if policyReferencesNamespaceEntity(policies[0]) {
 		return fmt.Errorf("spec.condition must not reference Namespace:: entities")
 	}
