@@ -2,6 +2,8 @@
 TOOLS_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/tools)
 TOOLS_MOD := $(TOOLS_DIR)/go.mod
 KUBEAPILINTER_PLUGIN := $(TOOLS_DIR)/bin/kube-api-linter.so
+GECKO_CONVENTIONS_PLUGIN := $(TOOLS_DIR)/bin/gecko-conventions.so
+GECKO_CONVENTIONS_DIR := $(TOOLS_DIR)/plugin
 
 # Use identical dependencies, CGO, and inherited GOFLAGS for both builds.
 # Keep the application working directory so the linter loads its module.
@@ -28,3 +30,4 @@ lint-fmt:
 lint-plugin:
 	@mkdir -p $(TOOLS_DIR)/bin
 	$(LINT_GO) build -modfile=$(TOOLS_MOD) -buildmode=plugin -o $(KUBEAPILINTER_PLUGIN) sigs.k8s.io/kube-api-linter/pkg/plugin
+	$(LINT_GO) -C $(GECKO_CONVENTIONS_DIR) build -buildmode=plugin -o $(GECKO_CONVENTIONS_PLUGIN) .

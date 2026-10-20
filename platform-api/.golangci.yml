@@ -19,8 +19,19 @@ linters:
     - errcheck
     - unused
     - kubeapilinter
+    - geckoconventions
   settings:
     custom:
+      geckoconventions:
+        # Path is relative to the config file (platform-api/.golangci.yml).
+        path: ../hack/tools/bin/gecko-conventions.so
+        description: >
+          geckoconventions enforces the platform API conventions documented in
+          API-CONVENTIONS.md that are not covered by other linters:
+          +required must not have omitempty; +immutable is forbidden;
+          prefer standard markers over kubebuilder-specific equivalents;
+          bool fields must not be named IsFoo; metav1.Time fields must end
+          with "Time".
       kubeapilinter:
         # Path is relative to the config file (platform-api/.golangci.yml).
         path: ../hack/tools/bin/kube-api-linter.so
@@ -136,6 +147,57 @@ linters:
       - linters:
           - kubeapilinter
         path: 'pkg/(authn|authz)/'
+
+      # ── geckoconventions ─────────────────────────────────────────────────
+      # TODO(geckoconventions): Review and fix these linting errors.
+      # The findings below baseline pre-existing violations in the API types.
+      # Each should be evaluated and fixed in a dedicated cleanup pass.
+      # Exclusions are scoped to the specific files that contain existing
+      # violations so that new violations in other files are still reported.
+      # The affected files are: channel_types.go, cluster_types.go,
+      # controlplane_upgrade_policy_types.go, nodepool_types.go,
+      # platformrole_types.go, role_types.go, rolebinding_types.go,
+      # version_types.go.
+
+      # requirednoomitempty: +required fields with omitempty — the fix is to
+      # remove omitempty from the JSON tag of every affected field.
+      - linters:
+          - geckoconventions
+        text: 'required field must not have omitempty'
+        path: 'api/private/v1/(cluster|nodepool)_types\.go'
+
+      # preferstandardmarkers: kubebuilder:validation:ListType used instead of
+      # the standard +listType marker. The pattern matches the value-inclusive
+      # message form (e.g. "use +listType=atomic instead of +kubebuilder:...").
+      - linters:
+          - geckoconventions
+        text: 'use \+listType'
+        path: 'api/private/v1/cluster_types\.go'
+
+      # scalarbounds: existing API fields missing scalar bound markers.
+      # Fixing these requires adding MaxLength, Minimum/Maximum, MaxItems, or
+      # MaxProperties to each affected field — a non-trivial effort that
+      # requires agreeing on appropriate bound values for each field.
+      - linters:
+          - geckoconventions
+        text: 'scalarbounds: (string|numeric|slice|map|.byte.) field is missing'
+        path: 'api/private/v1/(channel|cluster|controlplane_upgrade_policy|nodepool|platformrole|role|rolebinding|version)_types\.go'
+
+      # scalarbounds: pkg/authn and pkg/authz contain runtime plumbing structs,
+      # not Kubernetes API objects — skip scalar bound checks there.
+      - linters:
+          - geckoconventions
+        text: 'scalarbounds:'
+        path: 'pkg/(authn|authz)/'
+
+      # optionalhasomitempty: Items fields on list types are marked +optional
+      # without omitempty. Kubernetes list types conventionally always include
+      # items (even if empty), so omitempty should not be added; the correct
+      # fix is to remove the +optional marker from Items on list types.
+      - linters:
+          - geckoconventions
+        text: 'optional field must have omitempty'
+        path: 'api/private/v1/(platformrole|role|rolebinding)_types\.go'
     paths:
       - api/public/
 

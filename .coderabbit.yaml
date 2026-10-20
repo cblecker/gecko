@@ -9,3 +9,80 @@ reviews:
     # Run through make lint, which builds the required Go plugin.
     golangci-lint:
       enabled: false
+  path_instructions:
+  - path: "platform-api/api/**"
+    instructions: |
+      Ensure API changes follow the conventions in platform-api/API-CONVENTIONS.md.
+
+      The geckoconventions golangci-lint plugin (hack/tools/plugin/) and kube-api-linter
+      automatically enforce most rules. The checks below cannot be implemented as static
+      Go analyzers and must be enforced during code review.
+
+      ## Public field doc-strings must not contain internal information
+
+      Every field marked `// +orlop:public` produces a description in the public OpenAPI
+      schema and surfaces in customer-facing API reference documentation. Review these
+      doc-strings and reject any that contain:
+      - Management cluster names or anything identifying internal RH infrastructure
+        (e.g. management cluster names, GCP project IDs, internal service names).
+      - Internal network addresses unreachable by end-users.
+      - References to internal RH systems, tools, or abbreviations
+        (e.g. "hypershift infra create gcp", "iam-bindings.json", IAM role names).
+      - Credentials, secrets, or operator-tuning knobs.
+      Internal context belongs in the private-only field's comment or a design document,
+      not in the public doc-string.
+
+      ## Scalar bound values must be appropriate for the field
+
+      The scalarbounds analyzer checks that MaxLength / Minimum / Maximum / MaxItems /
+      MaxProperties markers are present, but does not check their values. Review that
+      the chosen value is actually appropriate:
+      - MaxLength should reflect the real maximum the platform can accept, not an
+        arbitrarily large sentinel like 65535 on a field with tighter real limits.
+      - Minimum=0 on a field that semantically requires a positive value should be
+        Minimum=1 instead.
+      - MaxItems on a list that the platform limits more tightly (e.g. GCP label
+        limits) must match the real limit.
+
+      ## CEL error messages must describe the valid form
+
+      Every `+kubebuilder:validation:XValidation` marker must have a `message=` argument
+      whose text describes what a valid value looks like, not just that the value is
+      invalid. Reject messages that say only "is invalid" or "must be valid"; require
+      them to describe the expected format, range, or pattern. Example:
+      - Bad:  message="region is invalid"
+      - Good: message="region must be a valid GCP region (e.g., us-central1, europe-west2)"
+
+      ## Boolean fields: prefer string alias when a third state is plausible
+
+      A plain `bool` field is appropriate only when the field is permanently binary with
+      no future possibility of a third state. If the field represents a lifecycle state,
+      an operational mode, or anything where "unknown" or a future third value is
+      plausible, require a string type alias with an Enum marker instead of bool. Example:
+      - Prefer: `type EndpointAccess string` with `+kubebuilder:validation:Enum=Private;PublicAndPrivate`
+      - Avoid:  `IsPublic bool`
+
+      ## No abbreviations except id and url
+
+      Field names (both Go and JSON) must not use abbreviations other than `id` and
+      `url`. Common violations to watch for:
+      - `Cfg`, `Conf` → `Config`
+      - `Addr` → `Address`
+      - `Msg` → `Message`
+      - `Num`, `No` → `Number` or `Count`
+      - `Src`, `Dest`, `Dst` → `Source`, `Destination`
+      - `NS` → `Namespace`
+      - `Mgmt` → `Management`
+      Established domain acronyms used as proper nouns (GCP, DNS, API, CIDR, VPC, IAM,
+      OIDC) are permitted as components of names but must follow PascalCase rules
+      (e.g. Go field `ProjectID` with JSON tag `projectID`, not Go field `ProjectId`).
+
+      ## Resource type and list type both registered in init()
+
+      Every root API type (those marked `+kubebuilder:object:root=true`) must have a
+      corresponding list type (e.g. `FooList`) and both must be passed to `register()`
+      in the package `init()` function. Check any new type declaration or init() change
+      to ensure:
+      - The resource type and its list type are both registered.
+      - No type is registered without a list, and no list is registered without its
+        element type.
