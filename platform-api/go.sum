@@ -25,8 +25,10 @@ cloud.google.com/go/spanner v1.96.1 h1:pLmq5/Fj+Yu6YGRBz9oMPm3ZRQIeG14FYBWFwhZZa
 cloud.google.com/go/spanner v1.96.1/go.mod h1:VqMSp/YlTofUq1q6ekkXBAmhAs6X860YL0I8wo7i+k0=
 connectrpc.com/connect v1.21.0 h1:LhqSJt7jHf5NJBo9Jq/t/9FjcYAideif0mg+qe2jCUs=
 connectrpc.com/connect v1.21.0/go.mod h1:A2ygJrukXwWy32vkCAAHNVguZrqZ+jeZ9rGRnGR4dN4=
-connectrpc.com/otelconnect v0.10.0 h1:K9Gt3TnhXMbZS+eif9AT3ODRALVh26+iNFUqrBFXu6A=
-connectrpc.com/otelconnect v0.10.0/go.mod h1:AvnyA6v08Yd/5k8Rt6EsBG8SOUed0WDgZfTR5jsbM30=
+connectrpc.com/connect/v2 v2.0.0 h1:PVVpWl2Xv9dIWN2gijs4HK40NSnPFzLqCEEmZ8fCUQ8=
+connectrpc.com/connect/v2 v2.0.0/go.mod h1:N32OLrstcPUzkykFynnefFro3+xzSdOrZlK2jHmS/xo=
+connectrpc.com/otelconnect v0.12.0 h1:SOQ2LvyPUON2WekzWUWhXEy2NHusTevV64xa6kAHsrQ=
+connectrpc.com/otelconnect v0.12.0/go.mod h1:BB9a3Z9DDsx8AAJREAdKVIENfa70XB1KQXWKRbfpLxw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 h1:BzsL0qE7LvtTEtXG7Dt5NS1EP0CQwI21HZfj9aGghhw=
 github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0/go.mod h1:I7kE2kM3qCr9QPT4cU4cCFYkEpVyVr16YOGUHzy+nR0=
