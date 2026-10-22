@@ -216,6 +216,6 @@ require (
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
 	mvdan.cc/gofumpt v0.12.0 // indirect
 	mvdan.cc/unparam v0.0.0-20261011093844-7a2c2c0b7aa6 // indirect
-	sigs.k8s.io/kube-api-linter v0.0.0-20260716143926-092fe0c72997 // indirect
+	sigs.k8s.io/kube-api-linter v0.0.0-20261012124120-79b557aa8c8d // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
