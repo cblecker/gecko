@@ -1,6 +1,8 @@
 package controlplaneupgrade
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestSelectZStreamCandidate(t *testing.T) {
 	tests := []struct {
@@ -125,6 +127,33 @@ func TestSelectYStreamCandidate(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("selectYStreamCandidate() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsValidCriticalPin(t *testing.T) {
+	tests := []struct {
+		name      string
+		pin       string
+		completed string
+		want      bool
+	}{
+		{name: "valid z-stream pin", pin: "4.15.1", completed: "4.15.0", want: true},
+		{name: "valid patch bump", pin: "4.15.3", completed: "4.15.2", want: true},
+		{name: "pin equals completed", pin: "4.15.0", completed: "4.15.0", want: false},
+		{name: "pin below completed", pin: "4.15.0", completed: "4.15.1", want: false},
+		{name: "cross-minor pin higher", pin: "4.16.0", completed: "4.15.5", want: false},
+		{name: "cross-minor pin lower", pin: "4.14.9", completed: "4.15.0", want: false},
+		{name: "cross-major pin", pin: "5.15.1", completed: "4.15.0", want: false},
+		{name: "empty pin", pin: "", completed: "4.15.0", want: false},
+		{name: "unparseable pin", pin: "not-a-version", completed: "4.15.0", want: false},
+		{name: "unparseable completed", pin: "4.15.1", completed: "bad", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidCriticalPin(tt.pin, tt.completed); got != tt.want {
+				t.Fatalf("isValidCriticalPin(%q, %q) = %v, want %v", tt.pin, tt.completed, got, tt.want)
 			}
 		})
 	}

@@ -90,6 +90,12 @@ type ClusterSpec struct {
 	// +required
 	Release ReleaseSpec `json:"release"`
 
+	// maintenance groups control-plane upgrade scheduling settings.
+	// When omitted, the platform may start an automatic upgrade at any time.
+	// +orlop:public
+	// +optional
+	Maintenance *ClusterMaintenanceSpec `json:"maintenance,omitempty"`
+
 	// networking defines the network topology for the cluster.
 	// +orlop:public
 	// +required
@@ -641,6 +647,106 @@ type ControlPlaneUpgradeResult struct {
 	// +orlop:public
 	// +optional
 	FailureMessage string `json:"failureMessage,omitempty"`
+}
+
+// ClusterMaintenanceSpec groups control-plane upgrade scheduling settings.
+type ClusterMaintenanceSpec struct {
+	// window defines when an automatic control-plane upgrade may start.
+	// When absent or null, the platform may start an automatic upgrade at any
+	// time. A PUT that includes the maintenance object but omits window clears
+	// any previously configured window. Omit the maintenance field entirely to
+	// preserve the current window.
+	// +orlop:public
+	// +optional
+	Window *ControlPlaneMaintenanceWindow `json:"window"`
+
+	// exclusions are non-recurring periods during which automatic
+	// control-plane upgrades must not start. Set to an empty list to clear
+	// all exclusions; omitting this field in a PUT preserves the existing
+	// exclusions.
+	// +orlop:public
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=3
+	Exclusions *[]ControlPlaneMaintenanceExclusion `json:"exclusions,omitempty"`
+
+	// criticalUpgrade pins an out-of-maintenance-window upgrade to an exact
+	// version (e.g. "4.14.3"). When set, the controller bypasses the
+	// window and exclusions for that exact version only.
+	// Once the cluster reaches that version the override is no longer effective.
+	// This is a private field — it is not exposed on the public API and may
+	// only be set by platform operators.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	CriticalUpgrade string `json:"criticalUpgrade,omitempty"`
+}
+
+// ControlPlaneMaintenanceWindow defines one recurring maintenance window.
+type ControlPlaneMaintenanceWindow struct {
+	// startTime is the date and time of the first occurrence of the maintenance
+	// window, in UTC. The platform uses this as the anchor for computing
+	// future occurrences based on the recurrence schedule.
+	// +orlop:public
+	// +required
+	StartTime metav1.Time `json:"startTime"`
+
+	// durationSeconds is how long each maintenance window occurrence stays
+	// open, in seconds. Automatic upgrades may only begin within this window.
+	// +orlop:public
+	// +required
+	// +kubebuilder:validation:Minimum=60
+	// +kubebuilder:validation:Maximum=86400
+	DurationSeconds int32 `json:"durationSeconds"`
+
+	// recurrence describes how often the maintenance window repeats.
+	// +orlop:public
+	// +required
+	Recurrence ControlPlaneMaintenanceRecurrence `json:"recurrence"`
+}
+
+// ControlPlaneMaintenanceRecurrence describes how a maintenance window repeats.
+type ControlPlaneMaintenanceRecurrence struct {
+	// frequency is how often the maintenance window repeats. The only
+	// supported value is "weekly".
+	// +orlop:public
+	// +required
+	// +kubebuilder:validation:MaxLength=6
+	// +kubebuilder:validation:Enum=weekly
+	Frequency string `json:"frequency"`
+
+	// daysOfWeek lists the days of the week on which the maintenance window
+	// may start, using lowercase day names (for example "monday" or
+	// "saturday"). At least one day is required; all seven days are valid.
+	// +orlop:public
+	// +required
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=7
+	// +kubebuilder:validation:items:MaxLength=9
+	DaysOfWeek []string `json:"daysOfWeek"`
+}
+
+// ControlPlaneMaintenanceExclusion defines one non-recurring blackout period.
+type ControlPlaneMaintenanceExclusion struct {
+	// name is a unique identifier for this exclusion period. It is used to
+	// distinguish entries when multiple exclusions are configured.
+	// +orlop:public
+	// +required
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+
+	// startTime is the beginning of the exclusion period, in UTC. Automatic
+	// upgrades are not permitted from this time onward until endTime.
+	// +orlop:public
+	// +required
+	StartTime metav1.Time `json:"startTime"`
+
+	// endTime is the end of the exclusion period, in UTC. Automatic upgrades
+	// may resume after this time. Must be after startTime.
+	// +orlop:public
+	// +required
+	EndTime metav1.Time `json:"endTime"`
 }
 
 func init() { register(&Cluster{}, &ClusterList{}) }

@@ -16,6 +16,22 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// TestClusterSchemaMaintenanceWindowNull verifies that a null maintenance
+// window passes schema validation. Before PruneNonNullableNullsWithoutDefaults
+// was added to Processor.Process, "window":null would fail with
+// "must be of type object: null" even though null is the correct way to clear
+// a previously configured window in a public PUT.
+func TestClusterSchemaMaintenanceWindowNull(t *testing.T) {
+	processor := newClusterSchemaProcessor(t)
+	cluster := validCluster("4.15.0")
+	// Set window to nil — this serializes as "window":null in the maintenance object.
+	cluster.Spec.Maintenance = &ClusterMaintenanceSpec{Window: nil}
+
+	if errs := processor.Process(context.Background(), clusterAsMap(t, cluster), nil); len(errs) > 0 {
+		t.Fatalf("expected 'window:null' to pass schema validation, got: %v", errs)
+	}
+}
+
 func TestClusterSchemaAcceptsPrereleaseVersion(t *testing.T) {
 	processor := newClusterSchemaProcessor(t)
 	object := clusterAsMap(t, validCluster("5.0.0-ec.6"))

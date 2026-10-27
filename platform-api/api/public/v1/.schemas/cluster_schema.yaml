@@ -55,6 +55,73 @@ properties:
           rule: self == oldSelf
         - message: issuerURL must be a valid absolute URL
           rule: isURL(self)
+      maintenance:
+        description: ClusterMaintenanceSpec groups control-plane upgrade scheduling
+          settings.
+        properties:
+          exclusions:
+            items:
+              description: ControlPlaneMaintenanceExclusion defines one non-recurring
+                blackout period.
+              properties:
+                endTime:
+                  format: date-time
+                  type: string
+                name:
+                  maxLength: 63
+                  type: string
+                startTime:
+                  format: date-time
+                  type: string
+              required:
+              - endTime
+              - name
+              - startTime
+              type: object
+            maxItems: 3
+            type: array
+            x-kubernetes-list-map-keys:
+            - name
+            x-kubernetes-list-type: map
+          window:
+            description: ControlPlaneMaintenanceWindow defines one recurring maintenance
+              window.
+            properties:
+              durationSeconds:
+                format: int32
+                maximum: 86400
+                minimum: 60
+                type: integer
+              recurrence:
+                description: ControlPlaneMaintenanceRecurrence describes how a maintenance
+                  window repeats.
+                properties:
+                  daysOfWeek:
+                    items:
+                      maxLength: 9
+                      type: string
+                    maxItems: 7
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  frequency:
+                    enum:
+                    - weekly
+                    maxLength: 6
+                    type: string
+                required:
+                - daysOfWeek
+                - frequency
+                type: object
+              startTime:
+                format: date-time
+                type: string
+            required:
+            - durationSeconds
+            - recurrence
+            - startTime
+            type: object
+        type: object
       networking:
         properties:
           clusterNetwork:
