@@ -26,6 +26,7 @@ func applyHostedCluster(ctx context.Context, db *firestore.Client, groupKey, mcN
 		if err != nil {
 			return err
 		}
+		manifest := data["spec_kubeContent"].(map[string]any)
 		doc := db.Collection(collectionApplyDesires).Doc(id)
 		existing, err := tx.Get(doc)
 		switch {
@@ -41,10 +42,19 @@ func applyHostedCluster(ctx context.Context, db *firestore.Client, groupKey, mcN
 			if !found {
 				return fmt.Errorf("existing HostedCluster desire has no manifest")
 			}
-			mismatch, err = preserveResourceTags(data["spec_kubeContent"].(map[string]any), oldManifest)
+			mismatch, err = preserveResourceTags(manifest, oldManifest)
 			if err != nil {
 				return err
 			}
+		}
+		// Validate the selected list, not the unpreserved desired union. An
+		// existing cluster keeps its valid tags even if configuration adds keys.
+		tags, _, err := unstructured.NestedSlice(manifest, "spec", "platform", "gcp", "resourceTags")
+		if err != nil {
+			return err
+		}
+		if len(tags) > 50 {
+			return fmt.Errorf("HostedCluster resource tags must contain at most 50 entries")
 		}
 		readID, readData := buildReadDesireDoc(groupKey, mcName, ref)
 		if err := tx.Set(doc, data); err != nil {

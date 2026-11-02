@@ -2,6 +2,7 @@ package hc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -21,14 +22,32 @@ var (
 
 // LoadResourceTags reads the JSON tag list mounted from the HC configuration.
 // Empty lists and null disable tags. Invalid configuration fails startup.
+// Errors omit the configured path and tag contents because they reach startup logs.
 func LoadResourceTags(path string) ([]privatev1.GCPResourceTag, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read resource tags file %s: %w", path, err)
+		// PathError includes the configured path in its message. Keep only the
+		// underlying cause so errors.Is still identifies filesystem failures.
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			err = pathErr.Err
+		}
+		return nil, fmt.Errorf("read resource tags file: %w", err)
 	}
 	var tags []privatev1.GCPResourceTag
 	if err := json.Unmarshal(data, &tags); err != nil {
-		return nil, fmt.Errorf("parse resource tags file %s: %w", path, err)
+		// Decoder errors can contain input values. Report only their category
+		// and offset rather than wrapping the original error into startup logs.
+		var syntaxErr *json.SyntaxError
+		var typeErr *json.UnmarshalTypeError
+		switch {
+		case errors.As(err, &syntaxErr):
+			return nil, fmt.Errorf("parse resource tags file: invalid JSON at byte %d", syntaxErr.Offset)
+		case errors.As(err, &typeErr):
+			return nil, fmt.Errorf("parse resource tags file: unexpected value type at byte %d", typeErr.Offset)
+		default:
+			return nil, errors.New("parse resource tags file: invalid tag list")
+		}
 	}
 	if len(tags) > 50 {
 		return nil, fmt.Errorf("resource tags must contain at most 50 entries")
@@ -39,7 +58,7 @@ func LoadResourceTags(path string) ([]privatev1.GCPResourceTag, error) {
 			return nil, fmt.Errorf("resource tag at index %d: %w", i, err)
 		}
 		if seen[tag.Key] {
-			return nil, fmt.Errorf("duplicate resource tag key %q", tag.Key)
+			return nil, fmt.Errorf("duplicate resource tag key at index %d", i)
 		}
 		seen[tag.Key] = true
 	}
@@ -49,6 +68,8 @@ func LoadResourceTags(path string) ([]privatev1.GCPResourceTag, error) {
 // mergeResourceTags gives platform-configured tags precedence over per-cluster
 // tags by short key, including their parentID. A fresh sorted list avoids
 // mutating either input and prevents spurious changes to an atomic tag list.
+// The Firestore transport checks the combined count after selecting preserved
+// tags, so an oversized desired union cannot block an existing valid desire.
 func mergeResourceTags(requested, configured []privatev1.GCPResourceTag, projectID string) ([]privatev1.GCPResourceTag, error) {
 	byKey := make(map[string]privatev1.GCPResourceTag, len(requested)+len(configured))
 	for _, tag := range requested {
@@ -56,9 +77,6 @@ func mergeResourceTags(requested, configured []privatev1.GCPResourceTag, project
 	}
 	for _, tag := range configured {
 		byKey[tag.Key] = tag
-	}
-	if len(byKey) > 50 {
-		return nil, fmt.Errorf("combined resource tags must contain at most 50 entries")
 	}
 	keys := make([]string, 0, len(byKey))
 	for key := range byKey {

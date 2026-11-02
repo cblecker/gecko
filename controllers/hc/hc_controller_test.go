@@ -1527,7 +1527,7 @@ func TestReconcile_ResourceTagsConfigurationChangesReachTransport(t *testing.T) 
 	}
 }
 
-func TestReconcile_TooManyMergedResourceTags(t *testing.T) {
+func TestReconcile_MergedResourceTagCountIsDeferredToTransport(t *testing.T) {
 	cluster := buildReadyCluster("cluster-1", "4.15.0")
 	for i := range 50 {
 		cluster.Spec.Platform.GCP.ResourceTags = append(cluster.Spec.Platform.GCP.ResourceTags, privatev1.GCPResourceTag{Key: fmt.Sprintf("tag%d", i), Value: "v"})
@@ -1536,8 +1536,12 @@ func TestReconcile_TooManyMergedResourceTags(t *testing.T) {
 	_, store := buildReconciler(t, cluster, nil, tr, nil)
 	r := hc.New(tr, testLogger(t), store, nil, []privatev1.GCPResourceTag{{Key: "extra", Value: "v"}}, "", "")
 	_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
-	require.ErrorContains(t, err, "combined resource tags must contain at most 50")
-	require.Empty(t, tr.ApplyCalls, "invalid merged tags must not be delivered")
+	require.NoError(t, err)
+	require.Len(t, tr.ApplyCalls, 1, "transport must select preserved tags before checking count")
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(tr.ApplyCalls[0].Manifests[3], &obj))
+	gcp := obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)
+	require.Len(t, gcp["resourceTags"], 51)
 }
 
 func TestReconcile_InvalidConfiguredResourceTags(t *testing.T) {

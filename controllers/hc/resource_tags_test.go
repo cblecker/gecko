@@ -3,6 +3,7 @@ package hc
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -75,14 +76,15 @@ func TestMergeResourceTags(t *testing.T) {
 	empty, err := mergeResourceTags(nil, nil, "my-project")
 	require.NoError(t, err)
 	require.Empty(t, empty)
-	// Each source is valid separately; enforce the limit on the merged union.
+	// Merge all desired tags; the transport checks the limit after preservation.
 	many := make([]privatev1.GCPResourceTag, 50)
 	for i := range many {
 		many[i] = privatev1.GCPResourceTag{Key: fmt.Sprintf("tag%d", i), Value: "v"}
 	}
-	_, err = mergeResourceTags(many, []privatev1.GCPResourceTag{{Key: "extra", Value: "v"}}, "my-project")
-	require.ErrorContains(t, err, "combined resource tags must contain at most 50")
-	merged, err := mergeResourceTags(many, []privatev1.GCPResourceTag{{Key: "tag0", Value: "override"}}, "my-project")
+	merged, err := mergeResourceTags(many, []privatev1.GCPResourceTag{{Key: "extra", Value: "v"}}, "my-project")
+	require.NoError(t, err)
+	require.Len(t, merged, 51)
+	merged, err = mergeResourceTags(many, []privatev1.GCPResourceTag{{Key: "tag0", Value: "override"}}, "my-project")
 	require.NoError(t, err)
 	require.Len(t, merged, 50)
 }
@@ -199,4 +201,38 @@ func TestMergeResourceTagsParentScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadResourceTagsErrorsRedactInput(t *testing.T) {
+	const key = "customer-sensitive-key"
+	const value = "customer-sensitive-value"
+	for _, tc := range []struct{ name, data, want string }{
+		{"duplicate", `[{"key":"` + key + `","value":"` + value + `"},{"key":"` + key + `","value":"other"}]`, `^duplicate resource tag key at index 1$`},
+		{"syntax", `[{"key":"` + key + `","value":"` + value + `"}]!`, `^parse resource tags file: invalid JSON at byte [0-9]+$`},
+		{"number instead of key", `[{"key":12345678901234567890,"value":"` + value + `"}]`, `^parse resource tags file: unexpected value type at byte [0-9]+$`},
+		{"object instead of string", `[{"key":"` + key + `","value":{"` + value + `":"x"}}]`, `^parse resource tags file: unexpected value type at byte [0-9]+$`},
+		{"object instead of list", `{"` + key + `":"` + value + `"}`, `^parse resource tags file: unexpected value type at byte [0-9]+$`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTemp(t, tc.data)
+			tags, err := LoadResourceTags(path)
+			require.Error(t, err)
+			require.Nil(t, tags)
+			require.Regexp(t, tc.want, err.Error())
+			for _, sensitive := range []string{path, filepath.Base(path), key, value, "12345678901234567890"} {
+				require.NotContains(t, err.Error(), sensitive)
+			}
+		})
+	}
+}
+
+func TestLoadResourceTagsReadErrorRedactsPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "customer-sensitive-file.json")
+	tags, err := LoadResourceTags(path)
+	require.Error(t, err)
+	require.Nil(t, tags)
+	require.ErrorIs(t, err, os.ErrNotExist, "preserve filesystem error classification")
+	require.ErrorContains(t, err, "read resource tags file:")
+	require.NotContains(t, err.Error(), path)
+	require.NotContains(t, err.Error(), filepath.Base(path))
 }

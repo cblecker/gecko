@@ -1426,3 +1426,68 @@ func TestIntegration_Apply_MalformedExistingHostedCluster(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, stored.Data(), "spec_kubeContent", "failed preservation must not overwrite the document")
 }
+
+func TestIntegration_Apply_HostedClusterTagCount(t *testing.T) {
+	for _, initialCount := range []int{-1, 0, 50} {
+		t.Run(fmt.Sprintf("initial=%d", initialCount), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			c := newTestClient(t)
+			defer c.Close()
+			project := uniqueIntegrationProject("tag-count")
+			specs, err := firestore.NewClientWithDatabase(ctx, project, "specs", emulatorOpts(t)...)
+			require.NoError(t, err)
+			closeFirestoreClient(t, specs)
+			cleanupCollections(t, []*firestore.Client{specs}, "applydesires", "readdesires")
+			manifest := func(count int, release string) []byte {
+				var obj map[string]any
+				require.NoError(t, json.Unmarshal(hcManifest(t, "count-hc"), &obj))
+				require.NoError(t, unstructured.SetNestedField(obj, release, "spec", "release", "image"))
+				if count > 0 {
+					tags := make([]any, count)
+					for i := range tags {
+						tags[i] = map[string]any{"key": fmt.Sprintf("tag%02d", i), "value": "v"}
+					}
+					require.NoError(t, unstructured.SetNestedField(obj, tags, "spec", "platform", "gcp", "resourceTags"))
+				}
+				raw, err := json.Marshal(obj)
+				require.NoError(t, err)
+				return raw
+			}
+			if initialCount >= 0 {
+				_, err = c.Apply(ctx, project, testGroupKey, [][]byte{manifest(initialCount, "old")})
+				require.NoError(t, err)
+			}
+			feedback, err := c.Apply(ctx, project, testGroupKey, [][]byte{manifest(51, "new")})
+			if initialCount < 0 {
+				require.ErrorContains(t, err, "at most 50")
+				require.Nil(t, feedback)
+				for _, collection := range []string{"applydesires", "readdesires"} {
+					docs, err := specs.Collection(collection).Documents(ctx).GetAll()
+					require.NoError(t, err)
+					require.Empty(t, docs, "invalid first submission must not create a desire")
+				}
+				// A rejected first submission must not freeze its invalid list.
+				feedback, err = c.Apply(ctx, project, testGroupKey, [][]byte{manifest(50, "corrected")})
+				require.NoError(t, err)
+				require.NotNil(t, feedback.ResourceTagsMismatch)
+				require.False(t, *feedback.ResourceTagsMismatch)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, feedback.ResourceTagsMismatch)
+			require.True(t, *feedback.ResourceTagsMismatch)
+			docs, err := specs.Collection("applydesires").Documents(ctx).GetAll()
+			require.NoError(t, err)
+			require.Len(t, docs, 1)
+			stored := docs[0].Data()
+			tags, found, err := unstructured.NestedSlice(stored, "spec_kubeContent", "spec", "platform", "gcp", "resourceTags")
+			require.NoError(t, err)
+			require.Equal(t, initialCount > 0, found)
+			require.Len(t, tags, initialCount)
+			release, _, err := unstructured.NestedString(stored, "spec_kubeContent", "spec", "release", "image")
+			require.NoError(t, err)
+			require.Equal(t, "new", release)
+		})
+	}
+}
