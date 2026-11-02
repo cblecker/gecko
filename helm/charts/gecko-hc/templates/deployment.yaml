@@ -1,3 +1,6 @@
+{{- $labels := .Values.customerLabels | default "{}" | mustFromJson | default dict }}
+{{- $tags := .Values.resourceTags | default "[]" | mustFromJson | default list }}
+{{- $hasConfig := or $labels $tags }}
 {{- include "gecko-hc.validateValues" . }}
 apiVersion: apps/v1
 kind: Deployment
@@ -14,10 +17,10 @@ spec:
       {{- include "gecko-hc.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- $hasAnnotations := or .Values.podAnnotations (and .Values.customerLabels (ne .Values.customerLabels "{}")) }}
+      {{- $hasAnnotations := or .Values.podAnnotations $hasConfig }}
       {{- if $hasAnnotations }}
       annotations:
-        {{- if and .Values.customerLabels (ne .Values.customerLabels "{}") }}
+        {{- if $hasConfig }}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- end }}
         {{- with .Values.podAnnotations }}
@@ -37,11 +40,11 @@ spec:
       serviceAccountName: {{ include "gecko-hc.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if and .Values.customerLabels (ne .Values.customerLabels "{}") }}
+      {{- if $hasConfig }}
       volumes:
-        - name: customer-labels
+        - name: resource-config
           configMap:
-            name: {{ include "gecko-hc.fullname" . }}-customer-labels
+            name: {{ include "gecko-hc.fullname" . }}-resource-config
       {{- end }}
       containers:
         - name: hc
@@ -59,11 +62,16 @@ spec:
             - --workers={{ .Values.workers }}
             - --pull-secret-store-name={{ .Values.pullSecret.storeName }}
             - --pull-secret-gcp-key={{ .Values.pullSecret.gcpKey }}
-          {{- if and .Values.customerLabels (ne .Values.customerLabels "{}") }}
-            - --customer-labels-file=/etc/config/customer-labels/customer-labels.json
+            {{- if $labels }}
+            - --customer-labels-file=/etc/config/resources/customer-labels.json
+            {{- end }}
+            {{- if $tags }}
+            - --resource-tags-file=/etc/config/resources/resource-tags.json
+            {{- end }}
+          {{- if $hasConfig }}
           volumeMounts:
-            - name: customer-labels
-              mountPath: /etc/config/customer-labels
+            - name: resource-config
+              mountPath: /etc/config/resources
               readOnly: true
           {{- end }}
           resources:
