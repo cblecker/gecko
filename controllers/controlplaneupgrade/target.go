@@ -37,6 +37,30 @@ func selectZStreamCandidate(completed string, advertised []string) (string, erro
 	return selected, nil
 }
 
+// isAdvertised reports whether version appears verbatim in the advertised list.
+func isAdvertised(version string, advertised []string) bool {
+	for _, v := range advertised {
+		if v == version {
+			return true
+		}
+	}
+	return false
+}
+
+// isValidCriticalPin reports whether pin is a valid emergency z-stream override
+// for the given completed version. It delegates to selectZStreamCandidate with a
+// single-element list: the pin is valid iff selectZStreamCandidate would select it,
+// meaning it parses, shares the same major.minor as completed, and is strictly newer.
+// This prevents a cross-minor or downgrade pin from bypassing y-stream health gates
+// and Channel FleetMinorVersion authorization.
+func isValidCriticalPin(pin, completed string) bool {
+	if pin == "" {
+		return false
+	}
+	selected, err := selectZStreamCandidate(completed, []string{pin})
+	return err == nil && selected == pin
+}
+
 // selectYStreamCandidate returns the next sequential minor version from advertised
 // that does not exceed fleetMinorVersion authorization. Returns "" if no valid
 // y-stream candidate exists.

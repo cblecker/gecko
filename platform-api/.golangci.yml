@@ -107,6 +107,16 @@ linters:
           - unused
         text: 'var localSchemeBuilder is unused'
       # ── kubeapilinter ────────────────────────────────────────────────────
+      # optionalfields: ClusterMaintenanceSpec.Exclusions and .Window
+      # intentionally omit omitempty so that a public PUT can clear them.
+      # Without omitempty, a nil pointer serializes as JSON null, which
+      # json.Unmarshal uses to clear the field in the private object. With
+      # omitempty a nil value is absent from JSON and the stored value is
+      # preserved, making clearing impossible via the public API.
+      - linters:
+          - kubeapilinter
+        text: 'optionalfields: field ClusterMaintenanceSpec\.(Exclusions|Window)'
+
       # arrayofstruct: NetworkingSpec.ClusterNetwork is an intentional
       # list-of-struct design where the struct members form a natural key/value
       # pair.
@@ -197,7 +207,7 @@ linters:
       - linters:
           - geckoconventions
         text: 'optional field must have omitempty'
-        path: 'api/private/v1/(platformrole|role|rolebinding)_types\.go'
+        path: 'api/private/v1/(cluster|platformrole|role|rolebinding)_types\.go'
     paths:
       - api/public/
 

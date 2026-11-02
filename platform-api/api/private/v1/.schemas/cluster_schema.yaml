@@ -75,6 +75,116 @@ properties:
           rule: self == oldSelf
         - message: issuerURL must be a valid absolute URL
           rule: isURL(self)
+      maintenance:
+        description: |-
+          maintenance groups control-plane upgrade scheduling settings.
+          When omitted, the platform may start an automatic upgrade at any time.
+        properties:
+          criticalUpgrade:
+            description: |-
+              criticalUpgrade pins an out-of-maintenance-window upgrade to an exact
+              version (e.g. "4.14.3"). When set, the controller bypasses the
+              window and exclusions for that exact version only.
+              Once the cluster reaches that version the override is no longer effective.
+              This is a private field — it is not exposed on the public API and may
+              only be set by platform operators.
+            maxLength: 63
+            type: string
+          exclusions:
+            description: |-
+              exclusions are non-recurring periods during which automatic
+              control-plane upgrades must not start. Set to an empty list to clear
+              all exclusions; omitting this field in a PUT preserves the existing
+              exclusions.
+            items:
+              description: ControlPlaneMaintenanceExclusion defines one non-recurring
+                blackout period.
+              properties:
+                endTime:
+                  description: |-
+                    endTime is the end of the exclusion period, in UTC. Automatic upgrades
+                    may resume after this time. Must be after startTime.
+                  format: date-time
+                  type: string
+                name:
+                  description: |-
+                    name is a unique identifier for this exclusion period. It is used to
+                    distinguish entries when multiple exclusions are configured.
+                  maxLength: 63
+                  type: string
+                startTime:
+                  description: |-
+                    startTime is the beginning of the exclusion period, in UTC. Automatic
+                    upgrades are not permitted from this time onward until endTime.
+                  format: date-time
+                  type: string
+              required:
+              - endTime
+              - name
+              - startTime
+              type: object
+            maxItems: 3
+            type: array
+            x-kubernetes-list-map-keys:
+            - name
+            x-kubernetes-list-type: map
+          window:
+            description: |-
+              window defines when an automatic control-plane upgrade may start.
+              When absent or null, the platform may start an automatic upgrade at any
+              time. A PUT that includes the maintenance object but omits window clears
+              any previously configured window. Omit the maintenance field entirely to
+              preserve the current window.
+            properties:
+              durationSeconds:
+                description: |-
+                  durationSeconds is how long each maintenance window occurrence stays
+                  open, in seconds. Automatic upgrades may only begin within this window.
+                format: int32
+                maximum: 86400
+                minimum: 60
+                type: integer
+              recurrence:
+                description: recurrence describes how often the maintenance window
+                  repeats.
+                properties:
+                  daysOfWeek:
+                    description: |-
+                      daysOfWeek lists the days of the week on which the maintenance window
+                      may start, using lowercase day names (for example "monday" or
+                      "saturday"). At least one day is required; all seven days are valid.
+                    items:
+                      maxLength: 9
+                      type: string
+                    maxItems: 7
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  frequency:
+                    description: |-
+                      frequency is how often the maintenance window repeats. The only
+                      supported value is "weekly".
+                    enum:
+                    - weekly
+                    maxLength: 6
+                    type: string
+                required:
+                - daysOfWeek
+                - frequency
+                type: object
+              startTime:
+                description: |-
+                  startTime is the date and time of the first occurrence of the maintenance
+                  window, in UTC. The platform uses this as the anchor for computing
+                  future occurrences based on the recurrence schedule.
+                format: date-time
+                type: string
+            required:
+            - durationSeconds
+            - recurrence
+            - startTime
+            type: object
+        type: object
       networking:
         description: networking defines the network topology for the cluster.
         properties:
