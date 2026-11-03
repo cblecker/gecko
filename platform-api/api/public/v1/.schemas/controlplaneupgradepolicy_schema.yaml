@@ -45,6 +45,7 @@ properties:
           - name
           - start
           type: object
+        maxItems: 3
         type: array
         x-kubernetes-list-map-keys:
         - name

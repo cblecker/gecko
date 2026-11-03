@@ -37,18 +37,23 @@ type ControlPlaneUpgradePolicySpec struct {
 	// +required
 	ClusterID string `json:"clusterID"`
 
-	// MaintenanceWindow defines when an automatic control-plane upgrade may start.
+	// maintenanceWindow defines when an automatic control-plane upgrade may start.
 	// When omitted, the platform may start an automatic upgrade at any time.
+	// When configured, at least 48 hours must remain available in every rolling
+	// 32-day period from its start, after subtracting maintenance exclusions.
 
 	// +optional
 	MaintenanceWindow *ControlPlaneMaintenanceWindow `json:"maintenanceWindow,omitempty"`
 
-	// MaintenanceExclusions are non-recurring periods during which automatic
-	// control-plane upgrades must not start.
+	// maintenanceExclusions are non-recurring periods during which automatic
+	// control-plane upgrades must not start. At most three exclusions may be
+	// configured, each lasting no longer than 30 days. Overlapping exclusions
+	// count only once when evaluating maintenance availability.
 
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=3
 	MaintenanceExclusions []ControlPlaneMaintenanceExclusion `json:"maintenanceExclusions,omitempty"`
 }
 
@@ -91,12 +96,18 @@ type ControlPlaneMaintenanceRecurrence struct {
 
 // ControlPlaneMaintenanceExclusion defines one non-recurring blackout period.
 type ControlPlaneMaintenanceExclusion struct {
+	// name identifies this exclusion within the policy.
 
 	// +required
 	Name string `json:"name"`
 
+	// start is the inclusive start of this blackout period.
+
 	// +required
 	Start metav1.Time `json:"start"`
+
+	// end is the exclusive end of this blackout period, no more than 30 days
+	// after start.
 
 	// +required
 	End metav1.Time `json:"end"`

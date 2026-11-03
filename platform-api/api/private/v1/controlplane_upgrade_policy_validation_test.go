@@ -19,7 +19,7 @@ func validControlPlaneUpgradePolicy() *ControlPlaneUpgradePolicy {
 				DurationMinutes: 240,
 				Recurrence: ControlPlaneMaintenanceRecurrence{
 					Frequency:  "weekly",
-					DaysOfWeek: []string{"saturday"},
+					DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
 				},
 			},
 			MaintenanceExclusions: []ControlPlaneMaintenanceExclusion{

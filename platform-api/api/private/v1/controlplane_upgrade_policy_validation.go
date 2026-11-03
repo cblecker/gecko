@@ -4,8 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+)
+
+const (
+	maxControlPlaneMaintenanceExclusions        = 3
+	maxControlPlaneMaintenanceExclusionDuration = 30 * 24 * time.Hour
 )
 
 var validControlPlaneMaintenanceDays = map[string]struct{}{
@@ -43,6 +49,15 @@ func (p *ControlPlaneUpgradePolicy) ValidateDelete(_ context.Context) error {
 }
 
 func (p *ControlPlaneUpgradePolicy) validate() error {
+	if len(p.Spec.MaintenanceExclusions) > maxControlPlaneMaintenanceExclusions {
+		return fmt.Errorf("spec.maintenanceExclusions must contain at most 3 exclusions")
+	}
+	for i, exclusion := range p.Spec.MaintenanceExclusions {
+		if exclusion.End.Sub(exclusion.Start.Time) > maxControlPlaneMaintenanceExclusionDuration {
+			return fmt.Errorf("spec.maintenanceExclusions[%d] must not exceed 30 days", i)
+		}
+	}
+
 	if window := p.Spec.MaintenanceWindow; window != nil {
 		if window.DurationMinutes < 1 || window.DurationMinutes > 1440 {
 			return fmt.Errorf("spec.maintenanceWindow.durationMinutes must be between 1 and 1440")
@@ -80,5 +95,8 @@ func (p *ControlPlaneUpgradePolicy) validate() error {
 		seenExclusions[exclusion.Name] = struct{}{}
 	}
 
+	if window := p.Spec.MaintenanceWindow; window != nil {
+		return validateMaintenanceAvailability(window, p.Spec.MaintenanceExclusions)
+	}
 	return nil
 }
