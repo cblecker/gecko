@@ -97,7 +97,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/open-feature/flagd-schemas v0.2.15 // indirect
 	github.com/open-feature/flagd/core v0.19.2 // indirect
-	github.com/pandatix/go-abnf v0.5.4 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20260702190614-8ae5a48058df // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.25.0 // indirect
