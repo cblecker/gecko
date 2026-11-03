@@ -244,8 +244,8 @@ github.com/open-feature/go-sdk v1.20.0 h1:cQV15LaPAQi1bLEoR2KHlzVxm6UuEqrohJ7qXV
 github.com/open-feature/go-sdk v1.20.0/go.mod h1:lnLzUUPhw3J9gfj1utYmc7vXG9eM0apShLvr/rGAyCs=
 github.com/open-feature/go-sdk-contrib/providers/flagd v0.8.0 h1:iE/eQP3zl6ceFKMxw+V3Omr09PAJHyMs7Xc3HaVR3DQ=
 github.com/open-feature/go-sdk-contrib/providers/flagd v0.8.0/go.mod h1:rvpfWRfFN1dXB26vjH2beTygSpf9TQjEpLoUnZgZvP0=
-github.com/pandatix/go-abnf v0.5.4 h1:Ds32m+31oMVBw/vJB2uCI0qGa0zwmEftl0ZQkXClYDQ=
-github.com/pandatix/go-abnf v0.5.4/go.mod h1:AE0KD3/VNoCjGzc1gqetRKshbI4SYErXQ/8kPenR5mc=
+github.com/pandatix/go-abnf v0.5.5 h1:EXex5KkRQx4Dm6GnpAcQnIMBs9KiK0uf8p/wq+4t9PM=
+github.com/pandatix/go-abnf v0.5.5/go.mod h1:AE0KD3/VNoCjGzc1gqetRKshbI4SYErXQ/8kPenR5mc=
 github.com/planetscale/vtprotobuf v0.6.1-0.20260702190614-8ae5a48058df h1:x2ymdov8jnZLDPfI+VVcf/ZvzuZ2u36ieXTuQASMkWI=
 github.com/planetscale/vtprotobuf v0.6.1-0.20260702190614-8ae5a48058df/go.mod h1:araspv2uYKozbi5lrKaqpv1/Uei7eQSml8JCw2A3IRg=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
