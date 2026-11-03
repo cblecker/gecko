@@ -21,6 +21,10 @@ var (
 	//go:embed .schemas/nodepool_schema.yaml
 	NodePoolSchemaYAML string
 
+	// PlatformRoleSchemaYAML contains the OpenAPI v3 schema for PlatformRole.
+	//go:embed .schemas/platformrole_schema.yaml
+	PlatformRoleSchemaYAML string
+
 	// RoleBindingSchemaYAML contains the OpenAPI v3 schema for RoleBinding.
 	//go:embed .schemas/rolebinding_schema.yaml
 	RoleBindingSchemaYAML string
@@ -100,6 +104,19 @@ var NodePoolResourceInfo = types.ResourceInfo{
 	},
 }
 
+// PlatformRoleResourceInfo describes the PlatformRole resource type.
+var PlatformRoleResourceInfo = types.ResourceInfo{
+	GVK:        GroupVersion.WithKind("PlatformRole"),
+	Plural:     "platformroles",
+	Singular:   "platformrole",
+	Namespaced: false,
+	SchemaYAML: PlatformRoleSchemaYAML,
+	// Generated from // +orlop:public-verbs annotation.
+	Verbs: []string{"get", "list"},
+	// Generated from // +orlop:authorization-exempt-verbs annotation.
+	AuthorizationExemptVerbs: []string{"get", "list"},
+}
+
 // RoleBindingResourceInfo describes the RoleBinding resource type.
 var RoleBindingResourceInfo = types.ResourceInfo{
 	GVK:        GroupVersion.WithKind("RoleBinding"),
@@ -138,6 +155,7 @@ func GetResourceInfos() []types.ResourceInfo {
 		ChannelResourceInfo,
 		ClusterResourceInfo,
 		NodePoolResourceInfo,
+		PlatformRoleResourceInfo,
 		RoleBindingResourceInfo,
 		RoleResourceInfo,
 		VersionResourceInfo,

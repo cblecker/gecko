@@ -111,6 +111,10 @@ var PlatformRoleResourceInfo = types.ResourceInfo{
 	Singular:   "platformrole",
 	Namespaced: false,
 	SchemaYAML: PlatformRoleSchemaYAML,
+	// Generated from // +orlop:public-verbs annotation.
+	Verbs: []string{"get", "list"},
+	// Generated from // +orlop:authorization-exempt-verbs annotation.
+	AuthorizationExemptVerbs: []string{"get", "list"},
 }
 
 // RoleBindingResourceInfo describes the RoleBinding resource type.
