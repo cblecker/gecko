@@ -88,6 +88,15 @@ func TestControlPlaneUpgradePolicyPublicAPIValidation(t *testing.T) {
 		}
 	}
 	assertRejected(request(http.MethodPost, path, invalid))
+	invalidWithoutWindow := policy.DeepCopy()
+	invalidWithoutWindow.Spec.MaintenanceWindow = nil
+	freezeEnd := start.Add(130 * 24 * time.Hour)
+	invalidWithoutWindow.Spec.MaintenanceExclusions = []publicv1.ControlPlaneMaintenanceExclusion{
+		{Name: "freeze", Start: metav1.NewTime(start.Add(100 * 24 * time.Hour)), End: metav1.NewTime(freezeEnd)},
+		{Name: "four-hours", Start: metav1.NewTime(freezeEnd), End: metav1.NewTime(freezeEnd.Add(4 * time.Hour))},
+		{Name: "five-hours", Start: metav1.NewTime(freezeEnd.Add(4 * time.Hour)), End: metav1.NewTime(freezeEnd.Add(9 * time.Hour))},
+	}
+	assertRejected(request(http.MethodPost, path, invalidWithoutWindow))
 	if _, err := store.Get(t.Context(), "customer", "test-policy"); !apierrors.IsNotFound(err) {
 		t.Fatalf("invalid create persisted a policy: %v", err)
 	}
@@ -122,6 +131,23 @@ func TestControlPlaneUpgradePolicyPublicAPIValidation(t *testing.T) {
 	})
 	if response.Code != http.StatusOK {
 		t.Fatalf("removing optional window returned %d: %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &policy); err != nil {
+		t.Fatal(err)
+	}
+	invalid = policy.DeepCopy()
+	invalid.Spec.MaintenanceWindow = nil
+	invalid.Spec.MaintenanceExclusions = invalidWithoutWindow.Spec.MaintenanceExclusions
+	assertRejected(request(http.MethodPut, path+"/test-policy", invalid))
+	assertRejected(request(http.MethodPatch, path+"/test-policy", map[string]any{
+		"spec": map[string]any{"maintenanceExclusions": invalid.Spec.MaintenanceExclusions},
+	}))
+	persisted, err = store.Get(t.Context(), "customer", "test-policy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.GetResourceVersion() != policy.ResourceVersion {
+		t.Fatal("invalid exclusions without a window changed the stored policy")
 	}
 }
 

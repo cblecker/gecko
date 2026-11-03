@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -19,13 +21,29 @@ type maintenanceInterval struct {
 
 // validateMaintenanceAvailability runs after structural validation. Periods
 // before the window's activation are not subject to its maintenance schedule.
+// Without a window, all time outside exclusions is available for maintenance.
 func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, exclusions []ControlPlaneMaintenanceExclusion) error {
-	activation := window.Start.UTC()
+	if window == nil && len(exclusions) == 0 {
+		return nil
+	}
 	blackouts := make([]maintenanceInterval, 0, len(exclusions))
 	for _, exclusion := range exclusions {
 		blackouts = append(blackouts, maintenanceInterval{exclusion.Start.UTC(), exclusion.End.UTC()})
 	}
 	slices.SortFunc(blackouts, func(a, b maintenanceInterval) int { return a.start.Compare(b.start) })
+	if window == nil {
+		// Model unrestricted timing as consecutive 24-hour occurrences. Periods
+		// ending before the first blackout cannot lose any availability.
+		window = &ControlPlaneMaintenanceWindow{
+			Start:           metav1.NewTime(blackouts[0].start.Add(-maintenanceAvailabilityPeriod)),
+			DurationMinutes: 1440,
+			Recurrence: ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
+			},
+		}
+	}
+	activation := window.Start.UTC()
 
 	// Without exclusions the schedule repeats every week, apart from its initial
 	// activation. One week of rolling-period starts covers that baseline. An

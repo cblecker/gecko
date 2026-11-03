@@ -38,7 +38,8 @@ type ControlPlaneUpgradePolicySpec struct {
 	ClusterID string `json:"clusterID"`
 
 	// maintenanceWindow defines when an automatic control-plane upgrade may start.
-	// When omitted, the platform may start an automatic upgrade at any time.
+	// When omitted, the platform may start an automatic upgrade at any time
+	// outside maintenance exclusions.
 	// When configured, at least 48 hours must remain available in every rolling
 	// 32-day period from its start, after subtracting maintenance exclusions.
 
@@ -49,6 +50,8 @@ type ControlPlaneUpgradePolicySpec struct {
 	// control-plane upgrades must not start. At most three exclusions may be
 	// configured, each lasting no longer than 30 days. Overlapping exclusions
 	// count only once when evaluating maintenance availability.
+	// Exclusions must leave at least 48 hours of maintenance availability in every
+	// rolling 32-day period, including when no maintenance window is configured.
 
 	// +optional
 	// +listType=map

@@ -95,8 +95,5 @@ func (p *ControlPlaneUpgradePolicy) validate() error {
 		seenExclusions[exclusion.Name] = struct{}{}
 	}
 
-	if window := p.Spec.MaintenanceWindow; window != nil {
-		return validateMaintenanceAvailability(window, p.Spec.MaintenanceExclusions)
-	}
-	return nil
+	return validateMaintenanceAvailability(p.Spec.MaintenanceWindow, p.Spec.MaintenanceExclusions)
 }

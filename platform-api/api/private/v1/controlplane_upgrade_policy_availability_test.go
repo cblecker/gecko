@@ -112,6 +112,74 @@ func TestControlPlaneUpgradePolicyExclusionLimits(t *testing.T) {
 	}
 }
 
+func TestControlPlaneUpgradePolicyRollingAvailabilityWithoutWindow(t *testing.T) {
+	start := time.Date(2026, time.January, 5, 2, 0, 0, 0, time.UTC)
+	const day = 24 * time.Hour
+	exclusion := func(name string, from, to time.Duration) ControlPlaneMaintenanceExclusion {
+		return maintenanceTestExclusion(name, start.Add(from), start.Add(to))
+	}
+	for _, tc := range []struct {
+		name       string
+		exclusions []ControlPlaneMaintenanceExclusion
+		wantError  string
+	}{
+		{name: "no exclusions"},
+		{
+			name:       "thirty day freeze leaves exactly forty eight hours",
+			exclusions: []ControlPlaneMaintenanceExclusion{exclusion("freeze", 0, 30*day)},
+		},
+		{
+			name: "thirty days plus four and five hours leaves thirty nine hours",
+			exclusions: []ControlPlaneMaintenanceExclusion{
+				exclusion("freeze", 0, 30*day),
+				exclusion("four-hours", 30*day, 30*day+4*time.Hour),
+				exclusion("five-hours", 30*day+4*time.Hour, 30*day+9*time.Hour),
+			},
+			wantError: "at least 48 hours",
+		},
+		{
+			name: "one nanosecond below forty eight hours",
+			exclusions: []ControlPlaneMaintenanceExclusion{
+				exclusion("freeze", 0, 30*day), exclusion("extra", 30*day, 30*day+time.Nanosecond),
+			},
+			wantError: "at least 48 hours",
+		},
+		{
+			name: "overlapping freezes count once",
+			exclusions: []ControlPlaneMaintenanceExclusion{
+				exclusion("one", 0, 30*day), exclusion("two", 0, 30*day), exclusion("three", 0, 30*day),
+			},
+		},
+		{
+			name: "separated freezes leave exactly forty eight hours",
+			exclusions: []ControlPlaneMaintenanceExclusion{
+				exclusion("one", 0, 15*day), exclusion("two", 16*day, 31*day),
+			},
+		},
+		{
+			name: "separated freezes leave only twenty four hours",
+			exclusions: []ControlPlaneMaintenanceExclusion{
+				exclusion("one", 0, 15*day), exclusion("two", 16*day, 32*day),
+			},
+			wantError: "at least 48 hours",
+		},
+		{
+			name: "distant freezes do not require scanning intervening years",
+			exclusions: []ControlPlaneMaintenanceExclusion{
+				maintenanceTestExclusion("later", time.Date(9000, time.January, 1, 2, 0, 0, 0, time.UTC), time.Date(9000, time.January, 31, 2, 0, 0, 0, time.UTC)),
+				exclusion("earlier", 0, 30*day),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := validControlPlaneUpgradePolicy()
+			policy.Spec.MaintenanceWindow = nil
+			policy.Spec.MaintenanceExclusions = tc.exclusions
+			assertMaintenancePolicyValidation(t, policy, tc.wantError)
+		})
+	}
+}
+
 func TestControlPlaneUpgradePolicyRollingAvailability(t *testing.T) {
 	start := time.Date(2026, time.January, 5, 2, 0, 0, 0, time.UTC)
 	const day = 24 * time.Hour
