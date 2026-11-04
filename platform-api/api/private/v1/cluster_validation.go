@@ -3,9 +3,11 @@ package v1
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -37,7 +39,7 @@ func (c *Cluster) ValidateCreate(_ context.Context) error {
 	if c.Spec.SafeName != DefaultSafeName(c.Name, c.UID) {
 		return fmt.Errorf("spec.safeName must be the default safe name for metadata.name")
 	}
-	return c.validateMaintenanceConfig()
+	return c.validateMaintenanceConfig(true)
 }
 
 // ValidateUpdate validates Cluster updates.
@@ -46,17 +48,21 @@ func (c *Cluster) ValidateUpdate(_ context.Context, oldObj runtime.Object) error
 	if !ok {
 		return fmt.Errorf("expected old object to be *Cluster, got %T", oldObj)
 	}
+	// Previously accepted timing configurations must not block unrelated spec
+	// changes or controller status writes. Public updates have already applied
+	// omission/preservation semantics before reaching this validator.
+	enforceSchedulingLimits := !sameMaintenanceTiming(c.Spec.Maintenance, oldCluster.Spec.Maintenance)
 
 	if oldCluster.Spec.SafeName == "" {
 		if c.Spec.SafeName != DefaultSafeName(c.Name, c.UID) {
 			return fmt.Errorf("spec.safeName must be the default safe name for metadata.name")
 		}
-		return c.validateMaintenanceConfig()
+		return c.validateMaintenanceConfig(enforceSchedulingLimits)
 	}
 	if c.Spec.SafeName != oldCluster.Spec.SafeName {
 		return fmt.Errorf("spec.safeName is immutable")
 	}
-	return c.validateMaintenanceConfig()
+	return c.validateMaintenanceConfig(enforceSchedulingLimits)
 }
 
 // ValidateDelete validates Cluster deletion.
@@ -64,8 +70,32 @@ func (c *Cluster) ValidateDelete(_ context.Context) error {
 	return nil
 }
 
-// validateMaintenanceConfig validates the inline maintenance settings.
-func (c *Cluster) validateMaintenanceConfig() error {
+// sameMaintenanceTiming compares the effective timing settings, ignoring the
+// private emergency pin and the order of set/map lists. Normalize copies so
+// validation never changes either object.
+func sameMaintenanceTiming(a, b *ClusterMaintenanceSpec) bool {
+	normalize := func(m *ClusterMaintenanceSpec) ClusterMaintenanceSpec {
+		var normalized ClusterMaintenanceSpec
+		if m == nil {
+			return normalized
+		}
+		if m.Window != nil {
+			normalized.Window = m.Window.DeepCopy()
+			slices.Sort(normalized.Window.Recurrence.DaysOfWeek)
+		}
+		if m.Exclusions != nil && len(*m.Exclusions) > 0 {
+			exclusions := slices.Clone(*m.Exclusions)
+			slices.SortFunc(exclusions, func(a, b ControlPlaneMaintenanceExclusion) int { return strings.Compare(a.Name, b.Name) })
+			normalized.Exclusions = &exclusions
+		}
+		return normalized
+	}
+	return apiequality.Semantic.DeepEqual(normalize(a), normalize(b))
+}
+
+// validateMaintenanceConfig always applies the existing structural checks.
+// New scheduling limits apply on creation or when the timing settings change.
+func (c *Cluster) validateMaintenanceConfig(enforceSchedulingLimits bool) error {
 	m := c.Spec.Maintenance
 	if m == nil {
 		return nil
@@ -74,12 +104,14 @@ func (c *Cluster) validateMaintenanceConfig() error {
 	if m.Exclusions != nil {
 		exclusions = *m.Exclusions
 	}
-	if len(exclusions) > maxControlPlaneMaintenanceExclusions {
-		return fmt.Errorf("spec.maintenance.exclusions must contain at most 3 exclusions")
-	}
-	for i, exclusion := range exclusions {
-		if exclusion.EndTime.Sub(exclusion.StartTime.Time) > maxControlPlaneMaintenanceExclusionDuration {
-			return fmt.Errorf("spec.maintenance.exclusions[%d] must not exceed 30 days", i)
+	if enforceSchedulingLimits {
+		if len(exclusions) > maxControlPlaneMaintenanceExclusions {
+			return fmt.Errorf("spec.maintenance.exclusions must contain at most 3 exclusions")
+		}
+		for i, exclusion := range exclusions {
+			if exclusion.EndTime.Sub(exclusion.StartTime.Time) > maxControlPlaneMaintenanceExclusionDuration {
+				return fmt.Errorf("spec.maintenance.exclusions[%d] must not exceed 30 days", i)
+			}
 		}
 	}
 
@@ -120,5 +152,8 @@ func (c *Cluster) validateMaintenanceConfig() error {
 		seenExclusions[exclusion.Name] = struct{}{}
 	}
 
-	return validateMaintenanceAvailability(m.Window, exclusions)
+	if enforceSchedulingLimits {
+		return validateMaintenanceAvailability(m.Window, exclusions)
+	}
+	return nil
 }

@@ -2,6 +2,7 @@ package v1_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
 
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/aggregated"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
 	pkgschema "github.com/openshift-online/gecko/orlop/pkg/apiserver/schema"
@@ -22,9 +24,12 @@ import (
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/registry/rest"
 
 	"sigs.k8s.io/yaml"
 )
@@ -39,8 +44,9 @@ func TestClusterMaintenancePublicAPIValidation(t *testing.T) {
 	}
 	gvk := privatev1.GroupVersion.WithKind("Cluster")
 	store := memory.NewMemoryStore("clusters", privateScheme, gvk)
+	converter := conversion.NewConverter(publicScheme, privateScheme, "")
 	handler := handlers.NewConvertingResourceHandler(store, maintenanceClusterSchemaProcessor(t, publicv1.ClusterSchemaYAML),
-		conversion.NewConverter(publicScheme, privateScheme, ""), gvk, "clusters", publicScheme, privateScheme, nil, logr.Discard())
+		converter, gvk, "clusters", publicScheme, privateScheme, nil, logr.Discard())
 	base := "/apis/gcp.managed.openshift.io/v1/namespaces/{namespace}/clusters"
 	router := chi.NewRouter()
 	router.Post(base, handler.Create)
@@ -123,13 +129,7 @@ func TestClusterMaintenancePublicAPIValidation(t *testing.T) {
 	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
 		"spec": map[string]any{"maintenance": map[string]any{"exclusions": invalid.Spec.Maintenance.Exclusions}},
 	}))
-	persisted, err := store.Get(t.Context(), "customer", "test-cluster")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persisted.GetResourceVersion() != cluster.ResourceVersion {
-		t.Fatal("invalid update or patch changed the stored cluster")
-	}
+	assertStoredMaintenanceClusterUnchanged(t, store, &cluster)
 	response = request(http.MethodPatch, path+"/test-cluster", map[string]any{
 		"spec": map[string]any{"maintenance": map[string]any{"window": nil}},
 	})
@@ -149,12 +149,122 @@ func TestClusterMaintenancePublicAPIValidation(t *testing.T) {
 	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
 		"spec": map[string]any{"maintenance": map[string]any{"exclusions": invalid.Spec.Maintenance.Exclusions}},
 	}))
-	persisted, err = store.Get(t.Context(), "customer", "test-cluster")
+	// Seed a formerly accepted schedule, bypassing admission as if it had been
+	// persisted before the rolling-availability validation was introduced.
+	legacy := assertStoredMaintenanceClusterUnchanged(t, store, &cluster)
+	legacy.Spec.Maintenance.Window = &privatev1.ControlPlaneMaintenanceWindow{
+		StartTime: metav1.NewTime(start), DurationSeconds: 14400,
+		Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{Frequency: "weekly", DaysOfWeek: []string{"saturday"}},
+	}
+	if err := store.Update(t.Context(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	publicLegacy, err := converter.PrivateToPublic(legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.GetResourceVersion() != cluster.ResourceVersion {
-		t.Fatal("invalid exclusions without a window changed the stored cluster")
+	for _, tc := range []struct {
+		name   string
+		mutate func(*publicv1.Cluster)
+	}{
+		{name: "unchanged timing", mutate: func(*publicv1.Cluster) {}},
+		{name: "omitted maintenance", mutate: func(c *publicv1.Cluster) { c.Spec.Maintenance = nil }},
+		{name: "omitted exclusions", mutate: func(c *publicv1.Cluster) { c.Spec.Maintenance.Exclusions = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updated := publicLegacy.(*publicv1.Cluster).DeepCopy()
+			tc.mutate(updated)
+			response := request(http.MethodPut, path+"/test-cluster", updated)
+			if response.Code != http.StatusOK {
+				t.Fatalf("legacy PUT returned %d: %s", response.Code, response.Body.String())
+			}
+			var next publicv1.Cluster
+			if err := json.Unmarshal(response.Body.Bytes(), &next); err != nil {
+				t.Fatal(err)
+			}
+			if !apiequality.Semantic.DeepEqual(next.Spec.Maintenance, publicLegacy.(*publicv1.Cluster).Spec.Maintenance) {
+				t.Fatal("legacy PUT changed the effective maintenance settings")
+			}
+			publicLegacy = &next
+		})
+	}
+	response = request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"metadata": map[string]any{"labels": map[string]string{"review": "legacy"}},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("unrelated legacy PATCH returned %d: %s", response.Code, response.Body.String())
+	}
+	var afterPatch publicv1.Cluster
+	if err := json.Unmarshal(response.Body.Bytes(), &afterPatch); err != nil {
+		t.Fatal(err)
+	}
+	invalid = afterPatch.DeepCopy()
+	invalid.Spec.Maintenance.Window.DurationSeconds = 18000
+	assertRejected(request(http.MethodPut, path+"/test-cluster", invalid))
+	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"spec": map[string]any{"maintenance": map[string]any{"window": map[string]any{"durationSeconds": 18000}}},
+	}))
+	assertStoredMaintenanceClusterUnchanged(t, store, &afterPatch)
+}
+
+func assertStoredMaintenanceClusterUnchanged(t *testing.T, store *memory.MemoryStore, expected *publicv1.Cluster) *privatev1.Cluster {
+	t.Helper()
+	persisted, err := store.Get(t.Context(), expected.Namespace, expected.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.GetResourceVersion() != expected.ResourceVersion {
+		t.Fatal("rejected update changed the stored cluster")
+	}
+	return persisted.(*privatev1.Cluster)
+}
+
+func TestClusterMaintenanceLegacyAggregatedStatusUpdate(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := privatev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	publicCluster := clusterForMaintenanceAPITest()
+	converted, err := newClusterConverter(t).PublicToPrivate(&publicCluster, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := converted.(*privatev1.Cluster)
+	legacy.Spec.Maintenance.Window.Recurrence.DaysOfWeek = []string{"saturday"}
+	ctx := genericapirequest.WithNamespace(t.Context(), legacy.Namespace)
+	if err := legacy.Default(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gvk := privatev1.GroupVersion.WithKind("Cluster")
+	store := memory.NewMemoryStore("clusters", scheme, gvk)
+	// Simulate an existing object accepted before the new availability limit.
+	if err := store.Create(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	strategy := aggregated.NewResourceStrategy(scheme, maintenanceClusterSchemaProcessor(t, privatev1.ClusterSchemaYAML), true, gvk, logr.Discard())
+	storage := aggregated.NewResourceStorage(store, strategy, gvk, "clusters", "cluster", scheme, logr.Discard(), nil)
+	statusStorage := aggregated.NewStatusStorage(storage)
+	updater := rest.DefaultUpdatedObjectInfo(nil, func(_ context.Context, _, old runtime.Object) (runtime.Object, error) {
+		updated := old.(*privatev1.Cluster).DeepCopy()
+		updated.Spec.Release.Version = "9.9.9"
+		updated.Status.Conditions = []metav1.Condition{{
+			Type: "HostedClusterAvailable", Status: metav1.ConditionTrue, Reason: "AsExpected", LastTransitionTime: metav1.Now(),
+		}}
+		return updated, nil
+	})
+	if _, _, err := statusStorage.Update(ctx, legacy.Name, updater, nil, nil, false, &metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("legacy maintenance blocked aggregated status update: %v", err)
+	}
+	persisted, err := store.Get(ctx, legacy.Namespace, legacy.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := persisted.(*privatev1.Cluster)
+	if !apiequality.Semantic.DeepEqual(updated.Spec, legacy.Spec) {
+		t.Fatal("status update changed the stored spec")
+	}
+	if len(updated.Status.Conditions) != 1 || updated.Status.Conditions[0].Status != metav1.ConditionTrue {
+		t.Fatalf("status conditions were not persisted: %v", updated.Status.Conditions)
 	}
 }
 

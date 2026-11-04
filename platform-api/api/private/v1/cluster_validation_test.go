@@ -157,3 +157,142 @@ func TestClusterValidateUpdate_InvalidMaintenanceConfig(t *testing.T) {
 		t.Fatal("expected maintenance config validation error on update")
 	}
 }
+
+func TestClusterValidateUpdate_LegacyMaintenance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(old, updated *Cluster)
+	}{
+		{name: "unchanged update", mutate: func(_, _ *Cluster) {}},
+		{
+			name: "unrelated spec update",
+			mutate: func(_, updated *Cluster) {
+				updated.Spec.Release.Version = "4.22.20"
+			},
+		},
+		{
+			name: "status update",
+			mutate: func(_, updated *Cluster) {
+				updated.Status.Conditions = []metav1.Condition{{Type: "HostedClusterAvailable", Status: metav1.ConditionTrue}}
+			},
+		},
+		{
+			name: "critical upgrade pin",
+			mutate: func(_, updated *Cluster) {
+				updated.Spec.Maintenance.CriticalUpgrade = "4.22.20"
+			},
+		},
+		{
+			name: "safe name backfill",
+			mutate: func(old, _ *Cluster) {
+				old.Spec.SafeName = ""
+			},
+		},
+		{
+			name: "equivalent timestamp",
+			mutate: func(_, updated *Cluster) {
+				updated.Spec.Maintenance.Window.StartTime.Time = updated.Spec.Maintenance.Window.StartTime.In(time.FixedZone("offset", 3600))
+			},
+		},
+		{
+			name: "reordered weekdays",
+			mutate: func(old, updated *Cluster) {
+				old.Spec.Maintenance.Window.Recurrence.DaysOfWeek = []string{"saturday", "sunday"}
+				updated.Spec.Maintenance.Window.Recurrence.DaysOfWeek = []string{"sunday", "saturday"}
+			},
+		},
+		{
+			name: "reordered exclusions",
+			mutate: func(old, updated *Cluster) {
+				first := (*old.Spec.Maintenance.Exclusions)[0]
+				second := first
+				second.Name = "other-freeze"
+				old.Spec.Maintenance.Exclusions = &[]ControlPlaneMaintenanceExclusion{first, second}
+				updated.Spec.Maintenance.Exclusions = &[]ControlPlaneMaintenanceExclusion{second, first}
+			},
+		},
+		{
+			name: "equivalent empty exclusions",
+			mutate: func(old, updated *Cluster) {
+				old.Spec.Maintenance.Exclusions = nil
+				updated.Spec.Maintenance.Exclusions = &[]ControlPlaneMaintenanceExclusion{}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := validClusterWithWindow()
+			old.Spec.Maintenance.Window.Recurrence.DaysOfWeek = []string{"saturday"}
+			updated := old.DeepCopy()
+			tc.mutate(old, updated)
+			if err := updated.ValidateUpdate(t.Context(), old); err != nil {
+				t.Fatalf("unchanged legacy timing blocked update: %v", err)
+			}
+		})
+	}
+}
+
+func TestClusterValidateUpdate_LegacyExclusionLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Cluster)
+	}{
+		{
+			name: "exclusion longer than thirty days",
+			mutate: func(c *Cluster) {
+				exclusion := &(*c.Spec.Maintenance.Exclusions)[0]
+				exclusion.EndTime.Time = exclusion.StartTime.Add(31 * 24 * time.Hour)
+			},
+		},
+		{
+			name: "combined exclusions leave under forty eight hours",
+			mutate: func(c *Cluster) {
+				exclusion := (*c.Spec.Maintenance.Exclusions)[0]
+				exclusion.EndTime.Time = exclusion.StartTime.Add(30 * 24 * time.Hour)
+				extra := maintenanceTestExclusion("extra", exclusion.EndTime.Time, exclusion.EndTime.Add(time.Hour))
+				c.Spec.Maintenance.Exclusions = &[]ControlPlaneMaintenanceExclusion{exclusion, extra}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := validClusterWithWindow()
+			old.Spec.Maintenance.Window = nil
+			tc.mutate(old)
+			updated := old.DeepCopy()
+			updated.Spec.Release.Version = "4.22.20"
+			if err := updated.ValidateUpdate(t.Context(), old); err != nil {
+				t.Fatalf("legacy exclusion limits blocked unrelated update: %v", err)
+			}
+			updated = old.DeepCopy()
+			(*updated.Spec.Maintenance.Exclusions)[0].EndTime.Time = (*updated.Spec.Maintenance.Exclusions)[0].EndTime.Add(time.Hour)
+			if err := updated.ValidateUpdate(t.Context(), old); err == nil {
+				t.Fatal("changing noncompliant exclusions must fail")
+			}
+			updated = old.DeepCopy()
+			(*updated.Spec.Maintenance.Exclusions)[0].EndTime.Time = (*updated.Spec.Maintenance.Exclusions)[0].StartTime.Add(time.Hour)
+			if err := updated.ValidateUpdate(t.Context(), old); err != nil {
+				t.Fatalf("correcting legacy exclusions must succeed: %v", err)
+			}
+		})
+	}
+}
+
+func TestClusterValidateUpdate_LegacyMaintenanceChanged(t *testing.T) {
+	old := validClusterWithWindow()
+	old.Spec.Maintenance.Window.Recurrence.DaysOfWeek = []string{"saturday"}
+	updated := old.DeepCopy()
+	updated.Spec.Maintenance.Window.DurationSeconds = 18000
+	assertMaintenanceValidationError(t, updated.ValidateUpdate(t.Context(), old), "at least 48 hours")
+	assertMaintenanceValidationError(t, old.ValidateCreate(t.Context()), "at least 48 hours")
+	updated = old.DeepCopy()
+	updated.Spec.Maintenance.Window.Recurrence.DaysOfWeek = []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+	if err := updated.ValidateUpdate(t.Context(), old); err != nil {
+		t.Fatalf("correcting the legacy window must succeed: %v", err)
+	}
+}
+
+func TestClusterValidateUpdate_UnchangedStructuralErrors(t *testing.T) {
+	old := validClusterWithWindow()
+	old.Spec.Maintenance.Window.Recurrence.Frequency = "monthly"
+	updated := old.DeepCopy()
+	assertMaintenanceValidationError(t, updated.ValidateUpdate(t.Context(), old), "frequency must be weekly")
+}
