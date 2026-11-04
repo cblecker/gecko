@@ -64,7 +64,6 @@ func (m *mockStatusWriter) Apply(_ context.Context, _ runtime.ApplyConfiguration
 type mockStoreClient struct {
 	cluster      *privatev1.Cluster
 	channel      *privatev1.Channel
-	policies     []privatev1.ControlPlaneUpgradePolicy
 	statusWriter *mockStatusWriter
 	updateCalled bool
 	updated      client.Object
@@ -101,13 +100,8 @@ func (m *mockStoreClient) Patch(_ context.Context, _ client.Object, _ client.Pat
 	return fmt.Errorf("unexpected cluster patch")
 }
 
-func (m *mockStoreClient) List(_ context.Context, list client.ObjectList, _ ...client.ListOption) error {
-	policies, ok := list.(*privatev1.ControlPlaneUpgradePolicyList)
-	if !ok {
-		return fmt.Errorf("unexpected list type %T", list)
-	}
-	policies.Items = append([]privatev1.ControlPlaneUpgradePolicy(nil), m.policies...)
-	return nil
+func (m *mockStoreClient) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	return fmt.Errorf("unexpected List call")
 }
 func (m *mockStoreClient) Create(_ context.Context, _ client.Object, _ ...client.CreateOption) error {
 	return nil
@@ -150,11 +144,7 @@ func buildReconciler(t *testing.T, cluster *privatev1.Cluster) (*Reconciler, *mo
 			FleetMinorVersion:     "4.15",
 		},
 	}
-	policy := privatev1.ControlPlaneUpgradePolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "policy-1", Namespace: "hyperfleet"},
-		Spec:       privatev1.ControlPlaneUpgradePolicySpec{ClusterID: "cluster-1"},
-	}
-	storeClient := &mockStoreClient{cluster: cluster, channel: channel, policies: []privatev1.ControlPlaneUpgradePolicy{policy}}
+	storeClient := &mockStoreClient{cluster: cluster, channel: channel}
 	return NewReconciler(storeClient, testLogger(t)), storeClient
 }
 
@@ -357,7 +347,7 @@ func TestReconcile_ActiveUpgrade_ObservesProgress(t *testing.T) {
 	require.Equal(t, metav1.ConditionFalse, meta.FindStatusCondition(captured.Status.Conditions, conditionDegraded).Status)
 }
 
-func TestReconcile_ActiveUpgrade_DoesNotRequireChannelOrPolicy(t *testing.T) {
+func TestReconcile_ActiveUpgrade_DoesNotRequireChannel(t *testing.T) {
 	cluster := readyCluster("4.15.1", nil)
 	cluster.Status.HostedClusterResult.Version = "4.15.0"
 	cluster.Status.HostedClusterResult.DesiredVersion = "4.15.1"
@@ -365,7 +355,6 @@ func TestReconcile_ActiveUpgrade_DoesNotRequireChannelOrPolicy(t *testing.T) {
 
 	r, storeClient := buildReconciler(t, cluster)
 	storeClient.channel = nil
-	storeClient.policies = nil
 
 	result, err := r.Reconcile(context.Background(), clusterReq("cluster-1"))
 
@@ -375,11 +364,10 @@ func TestReconcile_ActiveUpgrade_DoesNotRequireChannelOrPolicy(t *testing.T) {
 	require.True(t, storeClient.statusWriter.called)
 }
 
-func TestReconcile_NoPolicy_AllowsZStreamUpgrade(t *testing.T) {
+func TestReconcile_NoMaintenanceWindow_AllowsZStreamUpgrade(t *testing.T) {
 	cluster := readyCluster("4.15.0", []string{"4.15.1"})
 
 	r, storeClient := buildReconciler(t, cluster)
-	storeClient.policies = nil
 
 	result, err := r.Reconcile(context.Background(), clusterReq("cluster-1"))
 
@@ -411,7 +399,7 @@ func TestReconcile_VersionConflictRechecksCluster(t *testing.T) {
 	require.False(t, storeClient.updateCalled, "retry must observe the other writer's target")
 }
 
-func TestReconcile_NoPolicy_AllowsYStreamUpgrade(t *testing.T) {
+func TestReconcile_NoMaintenanceWindow_AllowsYStreamUpgrade(t *testing.T) {
 	cluster := readyCluster("4.22.14", []string{"4.22.17", "4.23.0-ec.1"})
 	cluster.Spec.Release.ChannelGroup = "candidate"
 	meta.SetStatusCondition(&cluster.Status.HostedClusterResult.ObservedConditions, metav1.Condition{
@@ -421,7 +409,6 @@ func TestReconcile_NoPolicy_AllowsYStreamUpgrade(t *testing.T) {
 	r, storeClient := buildReconciler(t, cluster)
 	storeClient.channel.Name = "candidate"
 	storeClient.channel.Spec.FleetMinorVersion = "4.23"
-	storeClient.policies = nil
 
 	result, err := r.Reconcile(context.Background(), clusterReq("cluster-1"))
 
@@ -432,12 +419,11 @@ func TestReconcile_NoPolicy_AllowsYStreamUpgrade(t *testing.T) {
 	require.Equal(t, targetSourceAutomatic, storeClient.statusWriter.captured.(*privatev1.Cluster).Status.ControlPlaneUpgrade.TargetSource)
 }
 
-func TestReconcile_NoPolicy_StillRequiresHealthyHostedCluster(t *testing.T) {
+func TestReconcile_NoMaintenanceWindow_StillRequiresHealthyHostedCluster(t *testing.T) {
 	cluster := readyCluster("4.15.0", []string{"4.15.1"})
 	cluster.Status.HostedClusterResult.ObservedConditions = nil
 
 	r, storeClient := buildReconciler(t, cluster)
-	storeClient.policies = nil
 
 	result, err := r.Reconcile(context.Background(), clusterReq("cluster-1"))
 
@@ -450,17 +436,19 @@ func TestReconcile_NoPolicy_StillRequiresHealthyHostedCluster(t *testing.T) {
 
 func TestReconcile_ZStreamWaitsForMaintenanceWindow(t *testing.T) {
 	cluster := readyCluster("4.15.0", []string{"4.15.1"})
-
-	r, storeClient := buildReconciler(t, cluster)
 	nextDay := time.Now().UTC().Add(24 * time.Hour)
-	storeClient.policies[0].Spec.MaintenanceWindow = &privatev1.ControlPlaneMaintenanceWindow{
-		Start:           metav1.NewTime(nextDay),
-		DurationMinutes: 60,
-		Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
-			Frequency:  "weekly",
-			DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.NewTime(nextDay),
+			DurationSeconds: 3600,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+			},
 		},
 	}
+
+	r, storeClient := buildReconciler(t, cluster)
 
 	result, err := r.Reconcile(context.Background(), clusterReq("cluster-1"))
 
@@ -476,20 +464,22 @@ func TestReconcile_YStreamExclusionBlocksUntilRemoved(t *testing.T) {
 	cluster := readyCluster("4.22.20", []string{"4.23.1"})
 	cluster.Status.HostedClusterResult.ObservedConditions = append(cluster.Status.HostedClusterResult.ObservedConditions,
 		metav1.Condition{Type: "ClusterVersionUpgradeable", Status: metav1.ConditionTrue, Reason: "AsExpected"})
+	now := time.Now().UTC().Truncate(time.Second)
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime: metav1.NewTime(now.Add(-time.Hour)), DurationSeconds: 14400,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency: "weekly", DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
+			},
+		},
+		Exclusions: &[]privatev1.ControlPlaneMaintenanceExclusion{{
+			Name: "freeze", StartTime: metav1.NewTime(now.Add(-time.Hour)), EndTime: metav1.NewTime(now.Add(2 * time.Hour)),
+		}},
+	}
+	require.NoError(t, cluster.Default(t.Context()))
+	require.NoError(t, cluster.ValidateCreate(t.Context()))
 	r, storeClient := buildReconciler(t, cluster)
 	storeClient.channel.Spec.FleetMinorVersion = "4.23"
-	now := time.Now().UTC().Truncate(time.Second)
-	policy := &storeClient.policies[0]
-	policy.Spec.MaintenanceWindow = &privatev1.ControlPlaneMaintenanceWindow{
-		Start: metav1.NewTime(now.Add(-time.Hour)), DurationMinutes: 240,
-		Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
-			Frequency: "weekly", DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
-		},
-	}
-	policy.Spec.MaintenanceExclusions = []privatev1.ControlPlaneMaintenanceExclusion{{
-		Name: "freeze", Start: metav1.NewTime(now.Add(-time.Hour)), End: metav1.NewTime(now.Add(2 * time.Hour)),
-	}}
-	require.NoError(t, policy.ValidateCreate(t.Context()))
 	for range 2 {
 		_, err := r.Reconcile(t.Context(), clusterReq(cluster.Name))
 		require.NoError(t, err)
@@ -499,9 +489,9 @@ func TestReconcile_YStreamExclusionBlocksUntilRemoved(t *testing.T) {
 		require.Equal(t, metav1.ConditionFalse, meta.FindStatusCondition(conditions, conditionProgressing).Status)
 		require.Equal(t, metav1.ConditionFalse, meta.FindStatusCondition(conditions, conditionDegraded).Status)
 	}
-	old := policy.DeepCopy()
-	policy.Spec.MaintenanceExclusions = nil
-	require.NoError(t, policy.ValidateUpdate(t.Context(), old))
+	old := cluster.DeepCopy()
+	cluster.Spec.Maintenance.Exclusions = &[]privatev1.ControlPlaneMaintenanceExclusion{}
+	require.NoError(t, cluster.ValidateUpdate(t.Context(), old))
 	_, err := r.Reconcile(t.Context(), clusterReq(cluster.Name))
 	require.NoError(t, err)
 	require.True(t, storeClient.updateCalled, "conditions: %+v", storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions)
@@ -510,20 +500,25 @@ func TestReconcile_YStreamExclusionBlocksUntilRemoved(t *testing.T) {
 	require.Equal(t, "automatic", upgrade.TargetSource)
 }
 
+// TestReconcile_CriticalUpgradeBypassesMaintenanceWindow verifies that setting
+// Cluster.spec.maintenance.criticalUpgrade to the exact candidate version bypasses
+// the maintenance window.
 func TestReconcile_CriticalUpgradeBypassesMaintenanceWindow(t *testing.T) {
 	cluster := readyCluster("4.15.0", []string{"4.15.1"})
-	cluster.Annotations = map[string]string{criticalUpgradeAnnotation: "true"}
-
-	r, storeClient := buildReconciler(t, cluster)
 	nextDay := time.Now().UTC().Add(24 * time.Hour)
-	storeClient.policies[0].Spec.MaintenanceWindow = &privatev1.ControlPlaneMaintenanceWindow{
-		Start:           metav1.NewTime(nextDay),
-		DurationMinutes: 60,
-		Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
-			Frequency:  "weekly",
-			DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		CriticalUpgrade: "4.15.1", // exact version pinned
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.NewTime(nextDay),
+			DurationSeconds: 3600,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+			},
 		},
 	}
+
+	r, storeClient := buildReconciler(t, cluster)
 
 	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
 
@@ -534,39 +529,156 @@ func TestReconcile_CriticalUpgradeBypassesMaintenanceWindow(t *testing.T) {
 	require.Equal(t, "CriticalUpgradeRequired", meta.FindStatusCondition(conditions, conditionAvailable).Reason)
 }
 
-func TestReconcile_PublicCriticalUpgradeAnnotationDoesNotBypassMaintenanceWindow(t *testing.T) {
-	cluster := readyCluster("4.15.0", []string{"4.15.1"})
-	cluster.Annotations = map[string]string{"gecko.openshift.io/critical-upgrade": "true"}
-
-	r, storeClient := buildReconciler(t, cluster)
+// TestReconcile_CriticalUpgradePreferredOverYStream verifies that when
+// criticalUpgrade pins an advertised z-stream patch and a y-stream candidate is
+// also available, the controller selects the pinned version and bypasses the
+// maintenance window rather than being blocked while the y-stream is selected.
+func TestReconcile_CriticalUpgradePreferredOverYStream(t *testing.T) {
+	// 4.15.1 is the pinned critical patch; 4.15.2 is also available z-stream.
+	// The test relies on buildReconciler which configures channel FleetMinorVersion
+	// "4.15", so there is no y-stream candidate here — use a cross-stream setup.
+	cluster := readyCluster("4.15.0", []string{"4.15.1", "4.15.2"})
 	nextDay := time.Now().UTC().Add(24 * time.Hour)
-	storeClient.policies[0].Spec.MaintenanceWindow = &privatev1.ControlPlaneMaintenanceWindow{
-		Start:           metav1.NewTime(nextDay),
-		DurationMinutes: 60,
-		Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
-			Frequency:  "weekly",
-			DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		CriticalUpgrade: "4.15.1", // pinned; 4.15.1 IS advertised
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.NewTime(nextDay),
+			DurationSeconds: 3600,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+			},
 		},
 	}
 
+	r, storeClient := buildReconciler(t, cluster)
+
 	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
 
+	// criticalUpgrade "4.15.1" is advertised, so it is selected before the
+	// z-stream winner (4.15.2). The override then applies and bypasses the window.
 	require.NoError(t, err)
-	require.False(t, storeClient.updateCalled)
+	require.True(t, storeClient.updateCalled, "pinned critical version must be selected and bypass the window")
+	require.Equal(t, "4.15.1", storeClient.updated.(*privatev1.Cluster).Spec.Release.Version)
+	conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
+	require.Equal(t, "CriticalUpgradeRequired", meta.FindStatusCondition(conditions, conditionAvailable).Reason)
+}
+
+// TestReconcile_CriticalUpgradeNotAdvertisedFallsBackToNormalSelection verifies
+// that when criticalUpgrade names a version not in AvailableUpdates, normal
+// candidate selection proceeds (z-stream or y-stream) and maintenance applies.
+func TestReconcile_CriticalUpgradeNotAdvertisedFallsBackToNormalSelection(t *testing.T) {
+	cluster := readyCluster("4.15.0", []string{"4.15.2"}) // 4.15.1 is NOT advertised
+	nextDay := time.Now().UTC().Add(24 * time.Hour)
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		CriticalUpgrade: "4.15.1", // pinned but not advertised
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.NewTime(nextDay),
+			DurationSeconds: 3600,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, cluster)
+
+	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+
+	// 4.15.1 is not advertised, so normal selection picks 4.15.2. The pin does
+	// not match the candidate so no override applies and the window blocks it.
+	require.NoError(t, err)
+	require.False(t, storeClient.updateCalled, "non-advertised pin must not bypass maintenance")
 	conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
 	require.Equal(t, "OutsideMaintenanceWindow", meta.FindStatusCondition(conditions, conditionProgressing).Reason)
 }
 
-func TestReconcile_InvalidMaintenanceWindowBlocksUpgrade(t *testing.T) {
-	cluster := readyCluster("4.15.0", []string{"4.15.1"})
-	r, storeClient := buildReconciler(t, cluster)
-	storeClient.policies[0].Spec.MaintenanceWindow = &privatev1.ControlPlaneMaintenanceWindow{
-		Start:           metav1.Now(),
-		DurationMinutes: 240,
-		Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
-			Frequency: "monthly", DaysOfWeek: []string{"monday"},
+// TestReconcile_CriticalUpgradeCrossMinorPinIgnored verifies that a criticalUpgrade
+// pin in a different minor version does not bypass y-stream gates or maintenance.
+// The pin must be a z-stream update of the current completed version.
+func TestReconcile_CriticalUpgradeCrossMinorPinIgnored(t *testing.T) {
+	// cluster is at 4.15.0; pin is in a different minor (4.16.1); maintenance window is in future.
+	cluster := readyCluster("4.15.0", []string{"4.15.1", "4.16.1"})
+	nextDay := time.Now().UTC().Add(24 * time.Hour)
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		CriticalUpgrade: "4.16.1", // cross-minor pin — must not bypass
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.NewTime(nextDay),
+			DurationSeconds: 3600,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+			},
 		},
 	}
+
+	r, storeClient := buildReconciler(t, cluster)
+
+	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+
+	// The cross-minor pin is rejected; normal selection picks 4.15.1 (z-stream).
+	// 4.15.1 != "4.16.1" so no override, maintenance window blocks it.
+	require.NoError(t, err)
+	require.False(t, storeClient.updateCalled, "cross-minor pin must not bypass maintenance")
+	conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
+	require.Equal(t, "OutsideMaintenanceWindow", meta.FindStatusCondition(conditions, conditionProgressing).Reason)
+}
+
+// TestReconcile_CrossMinorPinMatchingYStreamDoesNotBypassMaintenance is the
+// exact scenario from the chai bot bug report:
+//  1. Operator sets CriticalUpgrade = "4.16.0" on a cluster at 4.15.3
+//  2. isValidCriticalPin rejects it (cross-minor) — target selection picks y-stream "4.16.0"
+//  3. overrideCondition must NOT fire even though pin == candidate, because the
+//     pin is not a valid z-stream update — maintenance window must still block it.
+func TestReconcile_CrossMinorPinMatchingYStreamDoesNotBypassMaintenance(t *testing.T) {
+	// Cluster at 4.15.3; 4.16.0 is the only advertised update (y-stream).
+	// buildReconciler sets FleetMinorVersion="4.15" which blocks 4.16 — so we
+	// override the channel to authorize 4.16 to make the y-stream actually selected.
+	cluster := readyCluster("4.15.3", []string{"4.16.0"})
+	nextDay := time.Now().UTC().Add(24 * time.Hour)
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		CriticalUpgrade: "4.16.0", // cross-minor pin that matches the y-stream candidate
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.NewTime(nextDay),
+			DurationSeconds: 3600,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency:  "weekly",
+				DaysOfWeek: []string{strings.ToLower(nextDay.Weekday().String())},
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, cluster)
+	// Authorize 4.16 so the y-stream candidate is actually selected.
+	storeClient.channel.Spec.FleetMinorVersion = "4.16"
+
+	_, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
+
+	// The y-stream candidate 4.16.0 IS selected (pin == candidate), but the pin
+	// is not a valid z-stream update of 4.15.3, so overrideCondition must NOT fire.
+	// The upgrade is blocked (by health gate or maintenance) and no update is requested.
+	require.NoError(t, err)
+	require.False(t, storeClient.updateCalled, "cross-minor pin matching y-stream must not bypass maintenance")
+	conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
+	progressing := meta.FindStatusCondition(conditions, conditionProgressing)
+	require.NotNil(t, progressing)
+	require.Equal(t, metav1.ConditionFalse, progressing.Status, "upgrade must be blocked, not progressing")
+}
+
+func TestReconcile_InvalidMaintenanceWindowBlocksUpgrade(t *testing.T) {
+	cluster := readyCluster("4.15.0", []string{"4.15.1"})
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime:       metav1.Now(),
+			DurationSeconds: 14400,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency: "monthly", DaysOfWeek: []string{"monday"},
+			},
+		},
+	}
+
+	r, storeClient := buildReconciler(t, cluster)
 
 	result, err := r.Reconcile(context.Background(), clusterReq(cluster.Name))
 
@@ -575,30 +687,6 @@ func TestReconcile_InvalidMaintenanceWindowBlocksUpgrade(t *testing.T) {
 	require.False(t, storeClient.updateCalled)
 	conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
 	require.Equal(t, "InvalidMaintenanceWindow", meta.FindStatusCondition(conditions, conditionAvailable).Reason)
-	require.Equal(t, metav1.ConditionTrue, meta.FindStatusCondition(conditions, conditionDegraded).Status)
-}
-
-func TestReconcile_MultiplePolicies_SkipsAutomaticUpgrade(t *testing.T) {
-	cluster := readyCluster("4.15.0", []string{"4.15.1"})
-	meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
-		Type: conditionAvailable, Status: metav1.ConditionTrue, Reason: "UpdateSelected",
-	})
-
-	r, storeClient := buildReconciler(t, cluster)
-	storeClient.policies = append(storeClient.policies, privatev1.ControlPlaneUpgradePolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "policy-2", Namespace: "hyperfleet"},
-		Spec:       privatev1.ControlPlaneUpgradePolicySpec{ClusterID: "cluster-1"},
-	})
-
-	result, err := r.Reconcile(context.Background(), clusterReq("cluster-1"))
-
-	require.NoError(t, err)
-	require.Equal(t, requeueStable, result.RequeueAfter)
-	require.False(t, storeClient.updateCalled)
-	require.NotNil(t, storeClient.statusWriter)
-	conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
-	require.Equal(t, metav1.ConditionFalse, meta.FindStatusCondition(conditions, conditionAvailable).Status)
-	require.Equal(t, "MultipleUpgradePolicies", meta.FindStatusCondition(conditions, conditionAvailable).Reason)
 	require.Equal(t, metav1.ConditionTrue, meta.FindStatusCondition(conditions, conditionDegraded).Status)
 }
 

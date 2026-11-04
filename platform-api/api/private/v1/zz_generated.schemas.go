@@ -17,10 +17,6 @@ var (
 	//go:embed .schemas/cluster_schema.yaml
 	ClusterSchemaYAML string
 
-	// ControlPlaneUpgradePolicySchemaYAML contains the OpenAPI v3 schema for ControlPlaneUpgradePolicy.
-	//go:embed .schemas/controlplaneupgradepolicy_schema.yaml
-	ControlPlaneUpgradePolicySchemaYAML string
-
 	// NodePoolSchemaYAML contains the OpenAPI v3 schema for NodePool.
 	//go:embed .schemas/nodepool_schema.yaml
 	NodePoolSchemaYAML string
@@ -77,15 +73,6 @@ var ClusterResourceInfo = types.ResourceInfo{
 	},
 }
 
-// ControlPlaneUpgradePolicyResourceInfo describes the ControlPlaneUpgradePolicy resource type.
-var ControlPlaneUpgradePolicyResourceInfo = types.ResourceInfo{
-	GVK:        GroupVersion.WithKind("ControlPlaneUpgradePolicy"),
-	Plural:     "controlplaneupgradepolicies",
-	Singular:   "controlplaneupgradepolicy",
-	Namespaced: true,
-	SchemaYAML: ControlPlaneUpgradePolicySchemaYAML,
-}
-
 // NodePoolResourceInfo describes the NodePool resource type.
 var NodePoolResourceInfo = types.ResourceInfo{
 	GVK:        GroupVersion.WithKind("NodePool"),
@@ -124,6 +111,10 @@ var PlatformRoleResourceInfo = types.ResourceInfo{
 	Singular:   "platformrole",
 	Namespaced: false,
 	SchemaYAML: PlatformRoleSchemaYAML,
+	// Generated from // +orlop:public-verbs annotation.
+	Verbs: []string{"get", "list"},
+	// Generated from // +orlop:authorization-exempt-verbs annotation.
+	AuthorizationExemptVerbs: []string{"get", "list"},
 }
 
 // RoleBindingResourceInfo describes the RoleBinding resource type.
@@ -163,7 +154,6 @@ func GetResourceInfos() []types.ResourceInfo {
 	return []types.ResourceInfo{
 		ChannelResourceInfo,
 		ClusterResourceInfo,
-		ControlPlaneUpgradePolicyResourceInfo,
 		NodePoolResourceInfo,
 		PlatformRoleResourceInfo,
 		RoleBindingResourceInfo,

@@ -75,6 +75,123 @@ properties:
           rule: self == oldSelf
         - message: issuerURL must be a valid absolute URL
           rule: isURL(self)
+      maintenance:
+        description: |-
+          maintenance groups control-plane upgrade scheduling settings.
+          When omitted, the platform may start an automatic upgrade at any time.
+        properties:
+          criticalUpgrade:
+            description: |-
+              criticalUpgrade pins an out-of-maintenance-window upgrade to an exact
+              version (e.g. "4.14.3"). When set, the controller bypasses the
+              window and exclusions for that exact version only.
+              Once the cluster reaches that version the override is no longer effective.
+              This is a private field — it is not exposed on the public API and may
+              only be set by platform operators.
+            maxLength: 63
+            type: string
+          exclusions:
+            description: |-
+              exclusions are non-recurring periods during which automatic
+              control-plane upgrades must not start. Set to an empty list to clear
+              all exclusions; omitting this field in a PUT preserves the existing
+              exclusions.
+              At most three exclusions may be configured, each lasting no longer than
+              30 days. Overlapping exclusions count only once. Exclusions must leave at
+              least 48 hours of maintenance availability in every rolling 32-day period,
+              including when no window is configured and availability defaults to 24/7.
+            items:
+              description: ControlPlaneMaintenanceExclusion defines one non-recurring
+                blackout period.
+              properties:
+                endTime:
+                  description: |-
+                    endTime is the end of the exclusion period, in UTC. Automatic upgrades
+                    may resume after this time. Must be after startTime and no more than 30
+                    days later.
+                  format: date-time
+                  type: string
+                name:
+                  description: |-
+                    name is a unique identifier for this exclusion period. It is used to
+                    distinguish entries when multiple exclusions are configured.
+                  maxLength: 63
+                  type: string
+                startTime:
+                  description: |-
+                    startTime is the beginning of the exclusion period, in UTC. Automatic
+                    upgrades are not permitted from this time onward until endTime.
+                  format: date-time
+                  type: string
+              required:
+              - endTime
+              - name
+              - startTime
+              type: object
+            maxItems: 3
+            type: array
+            x-kubernetes-list-map-keys:
+            - name
+            x-kubernetes-list-type: map
+          window:
+            description: |-
+              window defines when an automatic control-plane upgrade may start.
+              When absent or null, the platform may start an automatic upgrade at any
+              time. A PUT that includes the maintenance object but omits window clears
+              any previously configured window. Omit the maintenance field entirely to
+              preserve the current window.
+              When configured, at least 48 hours must remain available in every rolling
+              32-day period from startTime, after subtracting exclusions.
+            properties:
+              durationSeconds:
+                description: |-
+                  durationSeconds is how long each maintenance window occurrence stays
+                  open, in seconds. Automatic upgrades may only begin within this window.
+                format: int32
+                maximum: 86400
+                minimum: 60
+                type: integer
+              recurrence:
+                description: recurrence describes how often the maintenance window
+                  repeats.
+                properties:
+                  daysOfWeek:
+                    description: |-
+                      daysOfWeek lists the days of the week on which the maintenance window
+                      may start, using lowercase day names (for example "monday" or
+                      "saturday"). At least one day is required; all seven days are valid.
+                    items:
+                      maxLength: 9
+                      type: string
+                    maxItems: 7
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  frequency:
+                    description: |-
+                      frequency is how often the maintenance window repeats. The only
+                      supported value is "weekly".
+                    enum:
+                    - weekly
+                    maxLength: 6
+                    type: string
+                required:
+                - daysOfWeek
+                - frequency
+                type: object
+              startTime:
+                description: |-
+                  startTime is the date and time of the first occurrence of the maintenance
+                  window, in UTC. The platform uses this as the anchor for computing
+                  future occurrences based on the recurrence schedule.
+                format: date-time
+                type: string
+            required:
+            - durationSeconds
+            - recurrence
+            - startTime
+            type: object
+        type: object
       networking:
         description: networking defines the network topology for the cluster.
         properties:
@@ -257,6 +374,80 @@ properties:
                 x-kubernetes-list-map-keys:
                 - key
                 x-kubernetes-list-type: map
+              resourceTags:
+                description: |-
+                  resourceTags selects pre-existing GCP Resource Manager tags to apply to
+                  supported GCP resources created for the cluster. Tags must already exist,
+                  and the cluster service accounts must have permission to use them.
+                  Each short key must be unique, even across different parents. When parentID
+                  is omitted, the cluster's GCP project is used. Tags can only be configured
+                  during cluster creation and cannot be added, removed, or changed later.
+                items:
+                  description: |-
+                    GCPResourceTag selects a pre-existing Google Cloud Resource Manager tag by
+                    its parent, short key, and short value. The tag must be defined in the
+                    cluster project or an organization before the cluster is created.
+                    See https://cloud.google.com/resource-manager/docs/tags/tags-overview.
+                  properties:
+                    key:
+                      description: |-
+                        key is required and is the short name of the pre-existing Resource Manager TagKey.
+                        A key is 1-63 characters, begins and ends with
+                        an ASCII alphanumeric character, and may contain letters, digits, '.',
+                        '_', or '-' between them.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                      x-kubernetes-validations:
+                      - message: key must start and end with an ASCII letter or digit
+                          and contain only ASCII letters, digits, '.', '_' or '-'
+                        rule: self.matches('^[a-zA-Z0-9]([0-9A-Za-z_.-]{0,61}[a-zA-Z0-9])?$')
+                    parentID:
+                      description: |-
+                        parentID is the ID of the project or organization that defines the TagKey.
+                        When omitted, the cluster's GCP project is used.
+                        An explicit value must be the cluster's GCP project ID or a numeric
+                        organization ID. A numeric value is treated as an organization ID; project
+                        numbers are not supported.
+                        An organization ID consists of 1 to 32 decimal digits and must not start with 0.
+                        A project ID is 6 to 30 characters long, contains only lowercase letters, digits
+                        and hyphens, starts with a letter and must not end with a hyphen.
+                      maxLength: 32
+                      minLength: 1
+                      type: string
+                      x-kubernetes-validations:
+                      - message: parentID must be a numeric organization ID or a valid
+                          GCP project ID
+                        rule: self.matches('(^[1-9][0-9]{0,31}$)|(^[a-z][a-z0-9-]{4,28}[a-z0-9]$)')
+                    value:
+                      description: |-
+                        value is required and is the short name of the pre-existing Resource Manager TagValue for
+                        key. Exactly one value for a TagKey can be attached to a resource. A value
+                        is 1-63 characters, begins and ends with an ASCII alphanumeric character,
+                        and may contain ASCII letters and digits, `_-.@%=+:,*#&()[]{}`, and
+                        spaces between them.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                      x-kubernetes-validations:
+                      - message: value must start and end with an ASCII letter or
+                          digit and contain only ASCII letters, digits, spaces or
+                          the characters _-.@%=+:,*#&()[]{}
+                        rule: self.matches('^[a-zA-Z0-9]([0-9A-Za-z_.@%=+:,*#&()\\[\\]{}\\-
+                          ]{0,61}[a-zA-Z0-9])?$')
+                  required:
+                  - key
+                  - value
+                  type: object
+                maxItems: 50
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: resourceTags are immutable
+                  rule: self == oldSelf
+                - message: resourceTags keys must be unique across all parents
+                  rule: self.all(t, self.exists_one(u, u.key == t.key))
               subnet:
                 description: subnet is the subnet name for Private Service Connect
                   endpoints.
@@ -486,6 +677,15 @@ properties:
             - subnet
             - workloadIdentity
             type: object
+            x-kubernetes-validations:
+            - fieldPath: .resourceTags
+              message: resourceTags may only be configured during cluster creation
+              rule: has(self.resourceTags) == has(oldSelf.resourceTags)
+            - fieldPath: .resourceTags
+              message: resourceTags parentID must be an organization ID or the cluster
+                GCP project ID
+              rule: '!has(self.resourceTags) || self.resourceTags.all(t, !has(t.parentID)
+                || t.parentID.matches(''^[1-9][0-9]{0,31}$'') || t.parentID == self.projectID)'
           type:
             description: type specifies the infrastructure provider. Must be "GCP".
             enum:

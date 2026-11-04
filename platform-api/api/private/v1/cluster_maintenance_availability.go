@@ -28,22 +28,22 @@ func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, excl
 	}
 	blackouts := make([]maintenanceInterval, 0, len(exclusions))
 	for _, exclusion := range exclusions {
-		blackouts = append(blackouts, maintenanceInterval{exclusion.Start.UTC(), exclusion.End.UTC()})
+		blackouts = append(blackouts, maintenanceInterval{exclusion.StartTime.UTC(), exclusion.EndTime.UTC()})
 	}
 	slices.SortFunc(blackouts, func(a, b maintenanceInterval) int { return a.start.Compare(b.start) })
 	if window == nil {
 		// Model unrestricted timing as consecutive 24-hour occurrences. Periods
 		// ending before the first blackout cannot lose any availability.
 		window = &ControlPlaneMaintenanceWindow{
-			Start:           metav1.NewTime(blackouts[0].start.Add(-maintenanceAvailabilityPeriod)),
-			DurationMinutes: 1440,
+			StartTime:       metav1.NewTime(blackouts[0].start.Add(-maintenanceAvailabilityPeriod)),
+			DurationSeconds: 86400,
 			Recurrence: ControlPlaneMaintenanceRecurrence{
 				Frequency:  "weekly",
 				DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
 			},
 		}
 	}
-	activation := window.Start.UTC()
+	activation := window.StartTime.UTC()
 
 	// Without exclusions the schedule repeats every week, apart from its initial
 	// activation. One week of rolling-period starts covers that baseline. An
@@ -89,7 +89,7 @@ func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, excl
 				}
 			}
 			if duration < minimumMaintenanceAvailability {
-				return fmt.Errorf("spec.maintenanceWindow and spec.maintenanceExclusions must leave at least 48 hours of maintenance availability in every rolling 32-day period; only %s remains between %s and %s",
+				return fmt.Errorf("spec.maintenance.window and spec.maintenance.exclusions must leave at least 48 hours of maintenance availability in every rolling 32-day period; only %s remains between %s and %s",
 					duration, start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
 			}
 		}
@@ -101,8 +101,8 @@ func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, excl
 // subtracting blackouts. Advancing the cursor through sorted blackouts counts
 // overlapping or adjacent exclusions only once.
 func maintenanceAvailableIntervals(window *ControlPlaneMaintenanceWindow, blackouts []maintenanceInterval, from, to time.Time) []maintenanceInterval {
-	activation := window.Start.UTC()
-	duration := time.Duration(window.DurationMinutes) * time.Minute
+	activation := window.StartTime.UTC()
+	duration := time.Duration(window.DurationSeconds) * time.Second
 	days := make(map[string]bool, len(window.Recurrence.DaysOfWeek))
 	for _, day := range window.Recurrence.DaysOfWeek {
 		days[day] = true

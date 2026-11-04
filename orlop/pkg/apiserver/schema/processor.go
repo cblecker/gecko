@@ -52,10 +52,17 @@ func (p *Processor) Process(ctx context.Context, obj, oldObj interface{}) field.
 	// 1. Prune unknown fields
 	pruning.Prune(obj, p.structural, true) // true = isResourceRoot
 
-	// 2. Apply defaults
+	// 2. Prune non-nullable null properties. Known fields with null values that
+	// are not marked nullable in the schema would fail type validation. Pruning
+	// them before validation allows clients to send null to clear a pointer field
+	// (e.g. spec.maintenance.window: null to remove a configured window) without
+	// triggering a spurious "must be of type object: null" schema error.
+	defaulting.PruneNonNullableNullsWithoutDefaults(obj, p.structural)
+
+	// 3. Apply defaults
 	defaulting.Default(obj, p.structural)
 
-	// 3. Validate against OpenAPI schema
+	// 4. Validate against OpenAPI schema
 	var errs field.ErrorList
 	result := p.validator.Validate(obj)
 	if !result.IsValid() {
@@ -68,7 +75,7 @@ func (p *Processor) Process(ctx context.Context, obj, oldObj interface{}) field.
 		}
 	}
 
-	// 4. Validate CEL rules (x-kubernetes-validations).
+	// 5. Validate CEL rules (x-kubernetes-validations).
 	// oldObj is nil on create. For rules without optionalOldSelf:true, the
 	// Kubernetes CEL library skips transition rules entirely when oldObj is
 	// nil, so immutability rules (e.g. self == oldSelf) do not fire on

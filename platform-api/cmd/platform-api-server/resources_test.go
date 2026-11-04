@@ -6,8 +6,9 @@ import (
 
 func TestGetPublicResourcesAuthorizationExemptCatalogVerbs(t *testing.T) {
 	wantAuthorizationExempt := map[string]bool{
-		"Channel": true,
-		"Version": true,
+		"Channel":      true,
+		"PlatformRole": true,
+		"Version":      true,
 	}
 	seen := make(map[string]bool)
 	for _, resource := range getPublicResources() {

@@ -10,8 +10,10 @@
 // Z-stream upgrades select the newest patch in the current minor version.
 // Y-stream upgrades select the next sequential minor version, authorized by
 // Channel.spec.fleetMinorVersion. Both upgrade types respect maintenance windows
-// and exclusions from ControlPlaneUpgradePolicy, with override conditions for
-// EOL proximity (y-stream) and critical security/platform issues (z-stream).
+// and exclusions from Cluster.spec.maintenance.window and
+// Cluster.spec.maintenance.exclusions, with override conditions for EOL proximity
+// (y-stream) and critical security/platform issues via
+// Cluster.spec.maintenance.criticalUpgrade (z-stream).
 package controlplaneupgrade
 
 import (
@@ -34,8 +36,6 @@ import (
 
 const (
 	adapterName = "control-plane-upgrade-controller"
-	// PolicyClusterIDField is the cache index used to find a Cluster's upgrade policy.
-	PolicyClusterIDField = "spec.clusterID"
 
 	conditionAvailable   = "ControlPlaneUpgradeAvailable"
 	conditionProgressing = "ControlPlaneUpgradeProgressing"
@@ -186,9 +186,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				newCondition(conditionDegraded, metav1.ConditionTrue, "TargetSelectionFailed", err.Error()),
 			)
 		}
+		// If CriticalUpgrade pins an exact version that is advertised, prefer it
+		// over the y-stream candidate so the emergency patch is not blocked by
+		// maintenance while the controller selects the minor-version upgrade instead.
+		// Otherwise prefer the y-stream target so a patch update does not consume
+		// an upgrade edge needed to enter the next minor version.
 		// TODO: Revisit target priority when progressive rollout introduces an
 		// explicit admission policy for choosing between available streams.
-		if yCandidate != "" {
+		criticalPin := ""
+		if cluster.Spec.Maintenance != nil {
+			criticalPin = cluster.Spec.Maintenance.CriticalUpgrade
+		}
+		// Apply the pin only when it is a valid z-stream update of completed
+		// (same major.minor, strictly newer). This prevents an operator-set pin
+		// in a different minor version from bypassing y-stream health gates and
+		// Channel FleetMinorVersion authorization.
+		if isValidCriticalPin(criticalPin, completed) && isAdvertised(criticalPin, hc.AvailableUpdates) {
+			candidate = criticalPin
+			isYStream = false
+		} else if yCandidate != "" {
 			candidate = yCandidate
 			isYStream = true
 		}
@@ -214,37 +230,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		)
 	}
 
-	// Policies are independently named child resources, so resolve the relationship
-	// through spec.clusterID instead of assuming a metadata.name convention.
-	var policies privatev1.ControlPlaneUpgradePolicyList
-	if err := r.apiClient.List(ctx, &policies,
-		client.InNamespace(cluster.Namespace),
-		client.MatchingFields{PolicyClusterIDField: cluster.Name},
-	); err != nil {
-		return reconcile.Result{}, fmt.Errorf("%s: list upgrade policies for cluster %s: %w", adapterName, cluster.Name, err)
-	}
-	if len(policies.Items) > 1 {
-		log.Warnf(ctx, "found %d control-plane upgrade policies, skipping automatic upgrade", len(policies.Items))
-		message := fmt.Sprintf("Found %d control-plane upgrade policies for this cluster; automatic upgrade is paused", len(policies.Items))
-		return r.writeStatus(ctx, &cluster, result, requeueStable,
-			newCondition(conditionAvailable, metav1.ConditionFalse, "MultipleUpgradePolicies", message),
-			newCondition(conditionProgressing, metav1.ConditionFalse, "MultipleUpgradePolicies", message),
-			newCondition(conditionDegraded, metav1.ConditionTrue, "MultipleUpgradePolicies", message),
-		)
-	}
-	var policy *privatev1.ControlPlaneUpgradePolicy
-	if len(policies.Items) == 1 {
-		policy = &policies.Items[0]
-	} else {
-		log.Infof(ctx, "no control-plane upgrade policy found, proceeding without a maintenance window")
-	}
-
 	// Check for critical security or platform overrides.
-	override, overrideReason, overrideMsg := overrideCondition(&cluster)
+	override, overrideReason, overrideMsg := overrideCondition(&cluster, candidate, completed)
 
 	// Evaluate maintenance window/exclusions unless override applies
 	if !override {
-		permitted, reason, message, next := maintenancePermitted(policy, time.Now())
+		permitted, reason, message, next := maintenancePermitted(&cluster, time.Now())
 		if !permitted {
 			return r.writeMaintenanceBlocked(ctx, &cluster, result, completed, candidate, isYStream, reason, message, next)
 		}

@@ -1,0 +1,250 @@
+package v1_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-logr/logr"
+
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
+	pkgschema "github.com/openshift-online/gecko/orlop/pkg/apiserver/schema"
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/storage/memory"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+	publicv1 "github.com/openshift-online/gecko/platform-api/api/public/v1"
+
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"sigs.k8s.io/yaml"
+)
+
+func TestClusterMaintenancePublicAPIValidation(t *testing.T) {
+	privateScheme, publicScheme := runtime.NewScheme(), runtime.NewScheme()
+	if err := privatev1.AddToScheme(privateScheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := publicv1.AddToScheme(publicScheme); err != nil {
+		t.Fatal(err)
+	}
+	gvk := privatev1.GroupVersion.WithKind("Cluster")
+	store := memory.NewMemoryStore("clusters", privateScheme, gvk)
+	handler := handlers.NewConvertingResourceHandler(store, maintenanceClusterSchemaProcessor(t, publicv1.ClusterSchemaYAML),
+		conversion.NewConverter(publicScheme, privateScheme, ""), gvk, "clusters", publicScheme, privateScheme, nil, logr.Discard())
+	base := "/apis/gcp.managed.openshift.io/v1/namespaces/{namespace}/clusters"
+	router := chi.NewRouter()
+	router.Post(base, handler.Create)
+	router.Put(base+"/{name}", handler.Update)
+	router.Patch(base+"/{name}", handler.Patch)
+	path := "/apis/gcp.managed.openshift.io/v1/namespaces/customer/clusters"
+	request := func(method, url string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		data, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), method, url, bytes.NewReader(data))
+		req.Header.Set("Content-Type", "application/json")
+		if method == http.MethodPatch {
+			req.Header.Set("Content-Type", "application/merge-patch+json")
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	cluster := clusterForMaintenanceAPITest()
+	start := cluster.Spec.Maintenance.Window.StartTime.Time
+	invalid := cluster.DeepCopy()
+	invalid.Spec.Maintenance.Window.DurationSeconds = 60
+	assertRejected := func(response *httptest.ResponseRecorder) {
+		t.Helper()
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "at least 48 hours") {
+			t.Fatalf("expected descriptive HTTP 400, got %d: %s", response.Code, response.Body.String())
+		}
+	}
+	assertRejected(request(http.MethodPost, path, invalid))
+	invalidWithoutWindow := cluster.DeepCopy()
+	invalidWithoutWindow.Spec.Maintenance.Window = nil
+	freezeEnd := start.Add(130 * 24 * time.Hour)
+	invalidWithoutWindow.Spec.Maintenance.Exclusions = &[]publicv1.ControlPlaneMaintenanceExclusion{
+		{Name: "freeze", StartTime: metav1.NewTime(start.Add(100 * 24 * time.Hour)), EndTime: metav1.NewTime(freezeEnd)},
+		{Name: "four-hours", StartTime: metav1.NewTime(freezeEnd), EndTime: metav1.NewTime(freezeEnd.Add(4 * time.Hour))},
+		{Name: "five-hours", StartTime: metav1.NewTime(freezeEnd.Add(4 * time.Hour)), EndTime: metav1.NewTime(freezeEnd.Add(9 * time.Hour))},
+	}
+	assertRejected(request(http.MethodPost, path, invalidWithoutWindow))
+	if _, err := store.Get(t.Context(), "customer", "test-cluster"); !apierrors.IsNotFound(err) {
+		t.Fatalf("invalid create persisted a cluster: %v", err)
+	}
+	response := request(http.MethodPost, path, &cluster)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("valid create returned %d: %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	// A public PUT that omits maintenance must preserve the existing schedule.
+	omitted := cluster.DeepCopy()
+	omitted.Spec.Maintenance = nil
+	response = request(http.MethodPut, path+"/test-cluster", omitted)
+	if response.Code != http.StatusOK {
+		t.Fatalf("omitting maintenance returned %d: %s", response.Code, response.Body.String())
+	}
+	cluster = publicv1.Cluster{}
+	if err := json.Unmarshal(response.Body.Bytes(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Spec.Maintenance == nil || cluster.Spec.Maintenance.Window == nil || cluster.Spec.Maintenance.Exclusions == nil || len(*cluster.Spec.Maintenance.Exclusions) != 1 {
+		t.Fatal("omitting maintenance did not preserve the window and exclusions")
+	}
+	// Omitted exclusions are preserved before validating a replacement window.
+	invalid = cluster.DeepCopy()
+	invalid.Spec.Maintenance.Exclusions = nil
+	invalid.Spec.Maintenance.Window.DurationSeconds = 7200
+	assertRejected(request(http.MethodPut, path+"/test-cluster", invalid))
+	invalid = cluster.DeepCopy()
+	invalid.Spec.Maintenance.Window.DurationSeconds = 60
+	assertRejected(request(http.MethodPut, path+"/test-cluster", invalid))
+	invalid = cluster.DeepCopy()
+	(*invalid.Spec.Maintenance.Exclusions)[0].EndTime.Time = (*invalid.Spec.Maintenance.Exclusions)[0].EndTime.Add(time.Second)
+	assertRejected(request(http.MethodPut, path+"/test-cluster", invalid))
+	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"spec": map[string]any{"maintenance": map[string]any{"window": map[string]any{"durationSeconds": 60}}},
+	}))
+	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"spec": map[string]any{"maintenance": map[string]any{"exclusions": invalid.Spec.Maintenance.Exclusions}},
+	}))
+	persisted, err := store.Get(t.Context(), "customer", "test-cluster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.GetResourceVersion() != cluster.ResourceVersion {
+		t.Fatal("invalid update or patch changed the stored cluster")
+	}
+	response = request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"spec": map[string]any{"maintenance": map[string]any{"window": nil}},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("removing optional window returned %d: %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Spec.Maintenance.Window != nil {
+		t.Fatal("removing the optional window did not clear it")
+	}
+	invalid = cluster.DeepCopy()
+	invalid.Spec.Maintenance.Window = nil
+	invalid.Spec.Maintenance.Exclusions = invalidWithoutWindow.Spec.Maintenance.Exclusions
+	assertRejected(request(http.MethodPut, path+"/test-cluster", invalid))
+	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"spec": map[string]any{"maintenance": map[string]any{"exclusions": invalid.Spec.Maintenance.Exclusions}},
+	}))
+	persisted, err = store.Get(t.Context(), "customer", "test-cluster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.GetResourceVersion() != cluster.ResourceVersion {
+		t.Fatal("invalid exclusions without a window changed the stored cluster")
+	}
+}
+
+func TestClusterMaintenanceExclusionCountSchemas(t *testing.T) {
+	for _, tc := range []struct{ name, schema string }{
+		{"private", privatev1.ClusterSchemaYAML},
+		{"public", publicv1.ClusterSchemaYAML},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			processor := maintenanceClusterSchemaProcessor(t, tc.schema)
+			for _, count := range []int{3, 4} {
+				cluster := clusterForMaintenanceAPITest()
+				exclusions := make([]publicv1.ControlPlaneMaintenanceExclusion, count)
+				for i := range count {
+					exclusions[i] = publicv1.ControlPlaneMaintenanceExclusion{
+						Name: string(rune('a' + i)), StartTime: metav1.NewTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)),
+						EndTime: metav1.NewTime(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC)),
+					}
+				}
+				cluster.Spec.Maintenance.Exclusions = &exclusions
+				data, err := json.Marshal(cluster)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var object map[string]any
+				if err := json.Unmarshal(data, &object); err != nil {
+					t.Fatal(err)
+				}
+				errs := processor.Process(t.Context(), object, nil)
+				if (len(errs) > 0) != (count > 3) {
+					t.Fatalf("count %d: schema errors = %v", count, errs)
+				}
+			}
+		})
+	}
+}
+
+func clusterForMaintenanceAPITest() publicv1.Cluster {
+	start := time.Date(2026, time.January, 5, 2, 0, 0, 0, time.UTC)
+	return publicv1.Cluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: publicv1.GroupVersion.String(), Kind: "Cluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster", Namespace: "customer"},
+		Spec: publicv1.ClusterSpec{
+			Platform: publicv1.ClusterPlatformSpec{
+				Type: "GCP",
+				GCP: &publicv1.GCPClusterPlatform{
+					ProjectID: "customer-project", Region: "us-central1", Network: "test-network", Subnet: "test-subnet",
+					WorkloadIdentity: publicv1.WorkloadIdentitySpec{
+						PoolID: "test-pool", ProjectNumber: "123456789012", ProviderID: "test-provider",
+						ServiceAccountsRef: &publicv1.ServiceAccountsRef{
+							NodePoolEmail: "nodepool@example.iam.gserviceaccount.com", ControlPlaneEmail: "controlplane@example.iam.gserviceaccount.com",
+							CloudControllerEmail: "cloudcontroller@example.iam.gserviceaccount.com", ImageRegistryEmail: "registry@example.iam.gserviceaccount.com",
+							NetworkEmail: "network@example.iam.gserviceaccount.com", StorageEmail: "storage@example.iam.gserviceaccount.com",
+						},
+					},
+				},
+			},
+			Release: publicv1.ReleaseSpec{Version: "4.22.20", ChannelGroup: "stable"},
+			Maintenance: &publicv1.ClusterMaintenanceSpec{
+				Window: &publicv1.ControlPlaneMaintenanceWindow{
+					StartTime: metav1.NewTime(start), DurationSeconds: 14400,
+					Recurrence: publicv1.ControlPlaneMaintenanceRecurrence{
+						Frequency: "weekly", DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
+					},
+				},
+				Exclusions: &[]publicv1.ControlPlaneMaintenanceExclusion{{
+					Name: "freeze", StartTime: metav1.NewTime(start.Add(100 * 24 * time.Hour)), EndTime: metav1.NewTime(start.Add(120 * 24 * time.Hour)),
+				}},
+			},
+		},
+	}
+}
+
+func maintenanceClusterSchemaProcessor(t *testing.T, schemaYAML string) *pkgschema.Processor {
+	t.Helper()
+	var propsV1 apiextv1.JSONSchemaProps
+	if err := yaml.Unmarshal([]byte(schemaYAML), &propsV1); err != nil {
+		t.Fatal(err)
+	}
+	var props apiext.JSONSchemaProps
+	if err := apiextv1.Convert_v1_JSONSchemaProps_To_apiextensions_JSONSchemaProps(&propsV1, &props, nil); err != nil {
+		t.Fatal(err)
+	}
+	structural, err := structuralschema.NewStructural(&props)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor, err := pkgschema.NewProcessor(structural, &props)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return processor
+}

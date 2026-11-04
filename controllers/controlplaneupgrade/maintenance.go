@@ -7,23 +7,20 @@ import (
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 )
 
-// Only the private API can set this annotation. Public API conversion strips
-// this prefix from customer input, so customers cannot bypass maintenance.
-const criticalUpgradeAnnotation = "private.orlop.gcp.managed.openshift.io/critical-upgrade"
-
 // maintenancePermitted evaluates whether an upgrade may start at the given time
-// according to the cluster's maintenance policy. It returns true if no policy is
-// set (upgrades permitted at any time), or if the current time falls within a
-// maintenance window and outside all exclusions.
-func maintenancePermitted(policy *privatev1.ControlPlaneUpgradePolicy, now time.Time) (permitted bool, reason, message string, nextWindow *time.Time) {
-	if policy == nil {
+// according to the cluster's inline maintenance policy. It returns true if no
+// maintenance window is configured (upgrades permitted at any time), or if the
+// current time falls within a maintenance window and outside all exclusions.
+func maintenancePermitted(cluster *privatev1.Cluster, now time.Time) (permitted bool, reason, message string, nextWindow *time.Time) {
+	m := cluster.Spec.Maintenance
+	if m == nil {
 		return true, "", "", nil
 	}
 
 	// Check if we're currently in an exclusion period
-	for _, exclusion := range policy.Spec.MaintenanceExclusions {
-		start := exclusion.Start.Time
-		end := exclusion.End.Time
+	for _, exclusion := range derefExclusions(m.Exclusions) {
+		start := exclusion.StartTime.Time
+		end := exclusion.EndTime.Time
 		if !now.Before(start) && now.Before(end) {
 			endUTC := end.UTC()
 			return false, "MaintenanceExclusionActive",
@@ -31,12 +28,12 @@ func maintenancePermitted(policy *privatev1.ControlPlaneUpgradePolicy, now time.
 				&endUTC
 		}
 	}
-	if policy.Spec.MaintenanceWindow == nil {
+	if m.Window == nil {
 		return true, "", "", nil
 	}
 
 	// Check if we're currently in a maintenance window
-	inWindow, next := inMaintenanceWindow(policy.Spec.MaintenanceWindow, now)
+	inWindow, next := inMaintenanceWindow(m.Window, now)
 	if inWindow {
 		return true, "", "", nil
 	}
@@ -57,18 +54,19 @@ func inMaintenanceWindow(window *privatev1.ControlPlaneMaintenanceWindow, now ti
 	}
 
 	// Convert window start to UTC
-	start := window.Start.UTC()
-	duration := time.Duration(window.DurationMinutes) * time.Minute
+	start := window.StartTime.UTC()
+	duration := time.Duration(window.DurationSeconds) * time.Second
 
 	// The policy API currently supports weekly recurrence only.
 	if window.Recurrence.Frequency != "weekly" {
 		return false, nil
 	}
 
-	// Build a map of allowed weekdays
+	// Build a map of allowed weekdays; skip any unrecognized names so that
+	// a bypassed-validation entry does not silently match a valid weekday.
 	allowedDays := make(map[time.Weekday]bool)
 	for _, dayName := range window.Recurrence.DaysOfWeek {
-		if day := parseWeekday(dayName); day >= 0 {
+		if day, ok := parseWeekday(dayName); ok {
 			allowedDays[day] = true
 		}
 	}
@@ -109,39 +107,54 @@ func inMaintenanceWindow(window *privatev1.ControlPlaneMaintenanceWindow, now ti
 	return false, nextStart
 }
 
-// parseWeekday converts a day name to time.Weekday
-func parseWeekday(name string) time.Weekday {
+// parseWeekday converts a lowercase day name to time.Weekday.
+// The boolean return is false for any unrecognized name, making the
+// sentinel explicit and preventing a stale -1 from being used as a weekday.
+func parseWeekday(name string) (time.Weekday, bool) {
 	switch name {
 	case "sunday":
-		return time.Sunday
+		return time.Sunday, true
 	case "monday":
-		return time.Monday
+		return time.Monday, true
 	case "tuesday":
-		return time.Tuesday
+		return time.Tuesday, true
 	case "wednesday":
-		return time.Wednesday
+		return time.Wednesday, true
 	case "thursday":
-		return time.Thursday
+		return time.Thursday, true
 	case "friday":
-		return time.Friday
+		return time.Friday, true
 	case "saturday":
-		return time.Saturday
+		return time.Saturday, true
 	default:
-		return -1
+		return 0, false
 	}
 }
 
 // overrideCondition checks if maintenance windows/exclusions should be bypassed
-// for a critical security or platform issue.
-func overrideCondition(cluster *privatev1.Cluster) (override bool, reason, message string) {
-	// Check for critical security or platform flag on the cluster
-	// This would be set by platform operators for emergency patches
-	if cluster.Annotations != nil {
-		if cluster.Annotations[criticalUpgradeAnnotation] == "true" {
-			return true, "CriticalUpgradeRequired",
-				"Critical security or platform issue requires immediate patching"
-		}
+// for the given upgrade candidate. The override fires only when all three
+// conditions hold: (1) CriticalUpgrade exactly matches the candidate, (2) the
+// pin is a valid z-stream update of completed (same major.minor, strictly newer).
+// Condition (2) prevents a cross-minor pin that coincidentally matches a
+// y-stream candidate from bypassing maintenance — the pin must be a z-stream
+// patch or it has no bypass authority.
+func overrideCondition(cluster *privatev1.Cluster, candidate, completed string) (override bool, reason, message string) {
+	if candidate == "" || cluster.Spec.Maintenance == nil {
+		return false, "", ""
 	}
-
+	pin := cluster.Spec.Maintenance.CriticalUpgrade
+	if pin == candidate && isValidCriticalPin(pin, completed) {
+		return true, "CriticalUpgradeRequired",
+			fmt.Sprintf("Critical security or platform issue requires immediate upgrade to %s", candidate)
+	}
 	return false, "", ""
+}
+
+// derefExclusions safely dereferences a *[]ControlPlaneMaintenanceExclusion,
+// returning nil (empty range) when the pointer is nil.
+func derefExclusions(e *[]privatev1.ControlPlaneMaintenanceExclusion) []privatev1.ControlPlaneMaintenanceExclusion {
+	if e == nil {
+		return nil
+	}
+	return *e
 }
