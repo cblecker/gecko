@@ -609,6 +609,9 @@ type ClusterMaintenanceSpec struct {
 	// time. A PUT that includes the maintenance object but omits window clears
 	// any previously configured window. Omit the maintenance field entirely to
 	// preserve the current window.
+	// When configured, at least 48 hours must remain available in every rolling
+	// 32-day period, including any initial wait before startTime and after
+	// subtracting exclusions.
 
 	// +optional
 	Window *ControlPlaneMaintenanceWindow `json:"window"`
@@ -617,6 +620,10 @@ type ClusterMaintenanceSpec struct {
 	// control-plane upgrades must not start. Set to an empty list to clear
 	// all exclusions; omitting this field in a PUT preserves the existing
 	// exclusions.
+	// At most three exclusions may be configured, each lasting no longer than
+	// 30 days. Overlapping exclusions count only once. Exclusions must leave at
+	// least 48 hours of maintenance availability in every rolling 32-day period,
+	// including when no window is configured and availability defaults to 24/7.
 
 	// +optional
 	// +listType=map
@@ -686,7 +693,8 @@ type ControlPlaneMaintenanceExclusion struct {
 	StartTime metav1.Time `json:"startTime"`
 
 	// endTime is the end of the exclusion period, in UTC. Automatic upgrades
-	// may resume after this time. Must be after startTime.
+	// may resume after this time. Must be after startTime and no more than 30
+	// days later.
 
 	// +required
 	EndTime metav1.Time `json:"endTime"`

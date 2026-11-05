@@ -460,6 +460,46 @@ func TestReconcile_ZStreamWaitsForMaintenanceWindow(t *testing.T) {
 		meta.FindStatusCondition(captured.Status.Conditions, conditionProgressing).Reason)
 }
 
+func TestReconcile_YStreamExclusionBlocksUntilRemoved(t *testing.T) {
+	cluster := readyCluster("4.22.20", []string{"4.23.1"})
+	cluster.Status.HostedClusterResult.ObservedConditions = append(cluster.Status.HostedClusterResult.ObservedConditions,
+		metav1.Condition{Type: "ClusterVersionUpgradeable", Status: metav1.ConditionTrue, Reason: "AsExpected"})
+	now := time.Now().UTC().Truncate(time.Second)
+	cluster.Spec.Maintenance = &privatev1.ClusterMaintenanceSpec{
+		Window: &privatev1.ControlPlaneMaintenanceWindow{
+			StartTime: metav1.NewTime(now.Add(-time.Hour)), DurationSeconds: 14400,
+			Recurrence: privatev1.ControlPlaneMaintenanceRecurrence{
+				Frequency: "weekly", DaysOfWeek: []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"},
+			},
+		},
+		Exclusions: &[]privatev1.ControlPlaneMaintenanceExclusion{{
+			Name: "freeze", StartTime: metav1.NewTime(now.Add(-time.Hour)), EndTime: metav1.NewTime(now.Add(2 * time.Hour)),
+		}},
+	}
+	require.NoError(t, cluster.Default(t.Context()))
+	require.NoError(t, cluster.ValidateCreate(t.Context()))
+	r, storeClient := buildReconciler(t, cluster)
+	storeClient.channel.Spec.FleetMinorVersion = "4.23"
+	for range 2 {
+		_, err := r.Reconcile(t.Context(), clusterReq(cluster.Name))
+		require.NoError(t, err)
+		require.False(t, storeClient.updateCalled)
+		conditions := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions
+		require.Equal(t, "MaintenanceExclusionActive", meta.FindStatusCondition(conditions, conditionAvailable).Reason)
+		require.Equal(t, metav1.ConditionFalse, meta.FindStatusCondition(conditions, conditionProgressing).Status)
+		require.Equal(t, metav1.ConditionFalse, meta.FindStatusCondition(conditions, conditionDegraded).Status)
+	}
+	old := cluster.DeepCopy()
+	cluster.Spec.Maintenance.Exclusions = &[]privatev1.ControlPlaneMaintenanceExclusion{}
+	require.NoError(t, cluster.ValidateUpdate(t.Context(), old))
+	_, err := r.Reconcile(t.Context(), clusterReq(cluster.Name))
+	require.NoError(t, err)
+	require.True(t, storeClient.updateCalled, "conditions: %+v", storeClient.statusWriter.captured.(*privatev1.Cluster).Status.Conditions)
+	require.Equal(t, "4.23.1", storeClient.updated.(*privatev1.Cluster).Spec.Release.Version)
+	upgrade := storeClient.statusWriter.captured.(*privatev1.Cluster).Status.ControlPlaneUpgrade
+	require.Equal(t, "automatic", upgrade.TargetSource)
+}
+
 // TestReconcile_CriticalUpgradeBypassesMaintenanceWindow verifies that setting
 // Cluster.spec.maintenance.criticalUpgrade to the exact candidate version bypasses
 // the maintenance window.
