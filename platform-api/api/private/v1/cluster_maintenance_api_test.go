@@ -79,6 +79,11 @@ func TestClusterMaintenancePublicAPIValidation(t *testing.T) {
 		}
 	}
 	assertRejected(request(http.MethodPost, path, invalid))
+	invalidFutureStart := cluster.DeepCopy()
+	invalidFutureStart.Spec.Maintenance.Exclusions = nil
+	invalidFutureStart.Spec.Maintenance.Window.StartTime = metav1.NewTime(time.Date(9999, time.January, 1, 0, 0, 0, 0, time.UTC))
+	invalidFutureStart.Spec.Maintenance.Window.DurationSeconds = 86400
+	assertRejected(request(http.MethodPost, path, invalidFutureStart))
 	invalidWithoutWindow := cluster.DeepCopy()
 	invalidWithoutWindow.Spec.Maintenance.Window = nil
 	freezeEnd := start.Add(130 * 24 * time.Hour)
@@ -98,6 +103,11 @@ func TestClusterMaintenancePublicAPIValidation(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &cluster); err != nil {
 		t.Fatal(err)
 	}
+	invalidFutureStart.ResourceVersion = cluster.ResourceVersion
+	assertRejected(request(http.MethodPut, path+"/test-cluster", invalidFutureStart))
+	assertRejected(request(http.MethodPatch, path+"/test-cluster", map[string]any{
+		"spec": map[string]any{"maintenance": map[string]any{"window": map[string]any{"startTime": "9999-01-01T00:00:00Z", "durationSeconds": 86400}}},
+	}))
 	// A public PUT that omits maintenance must preserve the existing schedule.
 	omitted := cluster.DeepCopy()
 	omitted.Spec.Maintenance = nil

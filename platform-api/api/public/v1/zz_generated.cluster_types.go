@@ -610,7 +610,8 @@ type ClusterMaintenanceSpec struct {
 	// any previously configured window. Omit the maintenance field entirely to
 	// preserve the current window.
 	// When configured, at least 48 hours must remain available in every rolling
-	// 32-day period from startTime, after subtracting exclusions.
+	// 32-day period, including any initial wait before startTime and after
+	// subtracting exclusions.
 
 	// +optional
 	Window *ControlPlaneMaintenanceWindow `json:"window"`

@@ -19,13 +19,15 @@ type maintenanceInterval struct {
 	end   time.Time `json:"-"`
 }
 
-// validateMaintenanceAvailability runs after structural validation. Periods
-// before the window's activation are not subject to its maintenance schedule.
+// validateMaintenanceAvailability runs after structural validation and includes
+// any initial wait from now until the configured window's activation.
 // Without a window, all time outside exclusions is available for maintenance.
-func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, exclusions []ControlPlaneMaintenanceExclusion) error {
+func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, exclusions []ControlPlaneMaintenanceExclusion, now time.Time) error {
 	if window == nil && len(exclusions) == 0 {
 		return nil
 	}
+	now = now.UTC()
+	startsInFuture := window != nil && window.StartTime.After(now)
 	blackouts := make([]maintenanceInterval, 0, len(exclusions))
 	for _, exclusion := range exclusions {
 		blackouts = append(blackouts, maintenanceInterval{exclusion.StartTime.UTC(), exclusion.EndTime.UTC()})
@@ -50,7 +52,14 @@ func validateMaintenanceAvailability(window *ControlPlaneMaintenanceWindow, excl
 	// exclusion can only affect periods starting between its start minus 32 days
 	// and its end. Checking those bounded regions avoids scanning gaps of years
 	// between exclusions; the API limits each exclusion to 30 days.
-	regions := []maintenanceInterval{{activation, activation.Add(7 * 24 * time.Hour)}}
+	var regions []maintenanceInterval
+	if startsInFuture {
+		// No maintenance is available before activation. For rolling starts
+		// between now and activation, availability can only increase as the
+		// right edge advances, so the period starting now is the minimum.
+		regions = append(regions, maintenanceInterval{now, now})
+	}
+	regions = append(regions, maintenanceInterval{activation, activation.Add(7 * 24 * time.Hour)})
 	for _, blackout := range blackouts {
 		if !blackout.end.After(activation) {
 			continue

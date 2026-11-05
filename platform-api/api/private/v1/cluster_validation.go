@@ -153,7 +153,7 @@ func (c *Cluster) validateMaintenanceConfig(enforceSchedulingLimits bool) error 
 	}
 
 	if enforceSchedulingLimits {
-		return validateMaintenanceAvailability(m.Window, exclusions)
+		return validateMaintenanceAvailability(m.Window, exclusions, time.Now())
 	}
 	return nil
 }

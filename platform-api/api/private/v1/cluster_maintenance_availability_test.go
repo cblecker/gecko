@@ -11,7 +11,8 @@ import (
 )
 
 // Integer-hour schedules have all availability boundaries on the hour, so an
-// exhaustive hourly model independently checks every possible rolling minimum.
+// exhaustive hourly model independently checks every possible rolling minimum,
+// including a variable wait before the schedule activates.
 func TestClusterMaintenanceAvailabilityAgainstHourlyModel(t *testing.T) {
 	rng := rand.New(rand.NewPCG(7, 32))
 	start := time.Date(2026, time.January, 5, 2, 0, 0, 0, time.UTC)
@@ -47,29 +48,102 @@ func TestClusterMaintenanceAvailabilityAgainstHourlyModel(t *testing.T) {
 			latestStart = max(latestStart, to+7*24)
 		}
 		const period = 32 * 24
-		prefix := make([]int, latestStart+period+1)
-		for hour := 0; hour < len(prefix)-1; hour++ {
-			permitted := hour%24 < hours && selected[strings.ToLower(start.AddDate(0, 0, hour/24).Weekday().String())]
+		firstHour := -rng.IntN(41 * 24)
+		prefix := make([]int, latestStart-firstHour+period+1)
+		for offset := 0; offset < len(prefix)-1; offset++ {
+			hour := firstHour + offset
+			permitted := hour >= 0 && hour%24 < hours && selected[strings.ToLower(start.AddDate(0, 0, hour/24).Weekday().String())]
 			for _, blackout := range blackouts {
 				if hour >= blackout[0] && hour < blackout[1] {
 					permitted = false
 				}
 			}
-			prefix[hour+1] = prefix[hour]
+			prefix[offset+1] = prefix[offset]
 			if permitted {
-				prefix[hour+1]++
+				prefix[offset+1]++
 			}
 		}
 		invalid := false
-		for hour := 0; hour <= latestStart; hour++ {
-			if prefix[hour+period]-prefix[hour] < 48 {
+		for offset := 0; offset <= latestStart-firstHour; offset++ {
+			if prefix[offset+period]-prefix[offset] < 48 {
 				invalid = true
 				break
 			}
 		}
-		if err := cluster.ValidateCreate(t.Context()); (err != nil) != invalid {
+		if err := validateMaintenanceAvailability(window, exclusions, start.Add(time.Duration(firstHour)*time.Hour)); (err != nil) != invalid {
 			t.Fatalf("trial %d: error=%v, model invalid=%v, hours=%d, days=%v, blackouts=%v", trial, err, invalid, hours, window.Recurrence.DaysOfWeek, blackouts)
 		}
+	}
+}
+
+func TestClusterMaintenanceFutureStart(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start time.Time
+	}{
+		{name: "one year away", start: time.Now().UTC().AddDate(1, 0, 0)},
+		{name: "year 9999", start: time.Date(9999, time.January, 1, 0, 0, 0, 0, time.UTC)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := validClusterWithWindow()
+			cluster.Spec.Maintenance.Exclusions = nil
+			cluster.Spec.Maintenance.Window.StartTime = metav1.NewTime(tc.start)
+			cluster.Spec.Maintenance.Window.DurationSeconds = 86400
+			t.Run("create", func(t *testing.T) {
+				assertMaintenanceValidationError(t, cluster.ValidateCreate(t.Context()), "at least 48 hours")
+			})
+			t.Run("update", func(t *testing.T) {
+				assertMaintenanceValidationError(t, cluster.ValidateUpdate(t.Context(), validClusterWithWindow()), "at least 48 hours")
+			})
+		})
+	}
+}
+
+func TestClusterMaintenanceInitialAvailability(t *testing.T) {
+	now := time.Date(2026, time.January, 5, 2, 0, 0, 0, time.UTC)
+	const day = 24 * time.Hour
+	for _, tc := range []struct {
+		name       string
+		delay      time.Duration
+		duration   int32
+		days       []string
+		noWindow   bool
+		exclusions []ControlPlaneMaintenanceExclusion
+		wantError  string
+	}{
+		{name: "already active", delay: -day, duration: 86400},
+		{name: "starts now", duration: 86400},
+		{name: "thirty day wait leaves exactly forty eight hours", delay: 30 * day, duration: 86400},
+		{name: "one nanosecond too late", delay: 30*day + time.Nanosecond, duration: 86400, wantError: "at least 48 hours"},
+		{name: "weekly schedule has enough initial occurrences", delay: 7 * day, duration: 43200, days: []string{"monday"}},
+		{name: "weekly schedule misses the first occurrence", delay: 8 * day, duration: 43200, days: []string{"monday"}, wantError: "at least 48 hours"},
+		{
+			name: "initial wait and freeze leave exactly forty eight hours", delay: 20 * day, duration: 86400,
+			exclusions: []ControlPlaneMaintenanceExclusion{maintenanceTestExclusion("freeze", now.Add(20*day), now.Add(30*day))},
+		},
+		{
+			name: "initial wait and freeze together violate availability", delay: 20 * day, duration: 86400,
+			exclusions: []ControlPlaneMaintenanceExclusion{maintenanceTestExclusion("freeze", now.Add(20*day), now.Add(31*day))},
+			wantError:  "at least 48 hours",
+		},
+		{
+			name: "no window remains available before distant exclusions", noWindow: true,
+			exclusions: []ControlPlaneMaintenanceExclusion{maintenanceTestExclusion("distant",
+				time.Date(9000, time.January, 1, 0, 0, 0, 0, time.UTC), time.Date(9000, time.January, 31, 0, 0, 0, 0, time.UTC))},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window := validClusterWithWindow().Spec.Maintenance.Window
+			window.StartTime = metav1.NewTime(now.Add(tc.delay))
+			window.DurationSeconds = tc.duration
+			if tc.days != nil {
+				window.Recurrence.DaysOfWeek = tc.days
+			}
+			if tc.noWindow {
+				window = nil
+			}
+			assertMaintenanceValidationError(t, validateMaintenanceAvailability(window, tc.exclusions, now), tc.wantError)
+		})
 	}
 }
 
