@@ -136,18 +136,30 @@ make test            # backend and entrypoint tests
 make lint-fmt lint   # formatting and linting, as for the other modules
 ```
 
-To run the backend with the SPA on one origin:
+To run the backend with the SPA on one origin, render a local copy of the page
+with your client ID (the container's entrypoint makes the same substitution) and
+serve that directory. The backend uses Application Default Credentials, so run
+`gcloud auth application-default login` first.
 
 ```bash
-OAUTH_CLIENT_ID=<client-id>.apps.googleusercontent.com \
+CLIENT_ID=<client-id>.apps.googleusercontent.com
+mkdir -p /tmp/signup-local
+cp frontend/app.js frontend/styles.css /tmp/signup-local/
+sed "s|data-client-id=\"\"|data-client-id=\"$CLIENT_ID\"|" frontend/index.html > /tmp/signup-local/index.html
+
+OAUTH_CLIENT_ID=$CLIENT_ID \
 WORKFLOW_PROJECT_ID=<leader-project> WORKFLOW_REGION=<leader-region> \
-FRONTEND_DIR=frontend \
+FRONTEND_DIR=/tmp/signup-local \
   go run ./cmd/server          # http://localhost:8080
 ```
 
-For local sign-in, set `window.SIGNUP_CONFIG` (`clientId`, `apiBase: ""`) in the
-browser console and add `http://localhost:8080` as an authorized JavaScript
-origin on a development OAuth client.
+`app.js` reads the client ID from the page once, when it loads. To change it,
+render the page again and reload; setting it later from the browser console has
+no effect.
+
+For local sign-in, use a development OAuth client and authorize both
+`http://localhost` and `http://localhost:8080` as JavaScript origins, as Google's
+guide requires for local testing.
 
 ## Images and chart
 
@@ -176,3 +188,11 @@ render when a required setting is missing or malformed. Its render tests need
 ```bash
 helm/charts/marketplace-signup/tests/render.sh
 ```
+
+### Network isolation
+
+The chart defines no NetworkPolicy. Isolating the sign-up pods from neighboring
+workloads is owned by the environment: a correct policy needs the Gateway's
+health-check and proxy ranges and the Google API egress for the specific
+cluster, so it is designed and verified with the environment's rollout in
+gcp-hcp-infra (GCP-1524) instead of being guessed here.
