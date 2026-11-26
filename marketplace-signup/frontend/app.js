@@ -254,6 +254,9 @@
     submitButton.disabled = true;
     setStatus("Activating the namespace…");
     const submittingToken = idToken;
+    // The user can switch accounts while the request is in flight. Whatever
+    // comes back belongs to the previous account and must not reach the new one.
+    const accountChanged = () => submittingToken !== idToken;
 
     try {
       const res = await fetch((cfg.apiBase || "") + "/api/v1/signup", {
@@ -266,6 +269,9 @@
       });
 
       const body = await res.json().catch(() => ({}));
+      if (accountChanged()) {
+        return;
+      }
       if (res.ok) {
         // Require a valid backend response; do not treat HTML 200 as success.
         const status = body && body.status;
@@ -274,11 +280,6 @@
         const validNamespace = typeof namespace === "string" && PROJECT_ID_PATTERN.test(namespace);
         if (!validStatus || !validNamespace) {
           fail("The platform could not confirm the activation. The response was not in the expected format. Check the project in the console or retry with the same account.");
-          return;
-        }
-        // Do not apply A's result to B after an account switch.
-        if (submittingToken !== idToken) {
-          setStatus("");
           return;
         }
         showSuccess(namespace, status === "already_active");
@@ -294,6 +295,9 @@
         fail(ERROR_MESSAGES[code] || "Sign-up failed. Please try again.");
       }
     } catch {
+      if (accountChanged()) {
+        return;
+      }
       fail("Could not reach the sign-up service. Check your connection and try again.");
     } finally {
       submitButton.disabled = false;

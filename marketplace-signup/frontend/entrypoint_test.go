@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -91,13 +92,62 @@ func TestPageCarriesTheConfigPlaceholders(t *testing.T) {
 	}
 }
 
+// contentSecurityPolicy parses the policy in index.html into directive -> sources.
+func contentSecurityPolicy(t *testing.T) map[string][]string {
+	t.Helper()
+	match := regexp.MustCompile(`http-equiv="Content-Security-Policy" content="([^"]*)"`).FindStringSubmatch(readFile(t, "index.html"))
+	if match == nil {
+		t.Fatal("index.html has no Content-Security-Policy meta tag")
+	}
+	policy := map[string][]string{}
+	for _, directive := range strings.Split(match[1], ";") {
+		if fields := strings.Fields(directive); len(fields) > 0 {
+			policy[fields[0]] = fields[1:]
+		}
+	}
+	return policy
+}
+
+func allows(sources []string, want string) bool {
+	for _, source := range sources {
+		if source == want {
+			return true
+		}
+	}
+	return false
+}
+
 // The entrypoint only accepts API origins the page's Content-Security-Policy
 // allows. If the policy's allowance changes, the entrypoint's rule must change
 // with it, or it would accept origins the browser then blocks.
 func TestEntrypointAcceptsOnlyWhatTheCSPAllows(t *testing.T) {
-	page := readFile(t, "index.html")
-	if !strings.Contains(page, "connect-src 'self' https://*.gcp-hcp.devshift.net ") {
+	if !allows(contentSecurityPolicy(t)["connect-src"], "https://*.gcp-hcp.devshift.net") {
 		t.Fatal("the page's connect-src no longer allows https://*.gcp-hcp.devshift.net; update the SIGNUP_API_BASE rule in entrypoint.sh to match")
+	}
+}
+
+// Google's Identity Services guide lists what a page's policy must allow for
+// sign-in to work: the library, the sign-in frames, the service endpoints and
+// the stylesheet. The page must manage that without 'unsafe-inline' or
+// 'unsafe-eval'.
+func TestCSPAllowsGoogleIdentityServicesWithoutUnsafeSources(t *testing.T) {
+	policy := contentSecurityPolicy(t)
+	for _, want := range []struct{ directive, source string }{
+		{"script-src", "https://accounts.google.com"},
+		{"frame-src", "https://accounts.google.com"},
+		{"connect-src", "https://accounts.google.com"},
+		{"style-src", "https://accounts.google.com/gsi/style"},
+	} {
+		if !allows(policy[want.directive], want.source) {
+			t.Errorf("%s does not allow %s, which Google Identity Services needs", want.directive, want.source)
+		}
+	}
+	for directive, sources := range policy {
+		for _, unsafe := range []string{"'unsafe-inline'", "'unsafe-eval'"} {
+			if allows(sources, unsafe) {
+				t.Errorf("%s allows %s", directive, unsafe)
+			}
+		}
 	}
 }
 
