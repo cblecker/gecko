@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const clientID = "320764385214-8m5obtbshb9ia4qf14s69ar9pv5is1nl.apps.googleusercontent.com"
+const clientID = "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com"
 
 // entrypointRun is the outcome of one entrypoint execution.
 type entrypointRun struct {
