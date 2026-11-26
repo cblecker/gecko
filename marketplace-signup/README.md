@@ -191,8 +191,11 @@ helm/charts/marketplace-signup/tests/render.sh
 
 ### Network isolation
 
-The chart defines no NetworkPolicy. Isolating the sign-up pods from neighboring
-workloads is owned by the environment: a correct policy needs the Gateway's
-health-check and proxy ranges and the Google API egress for the specific
-cluster, so it is designed and verified with the environment's rollout in
-gcp-hcp-infra (GCP-1524) instead of being guessed here.
+The chart defines no NetworkPolicy yet. The only chart in Gecko or gcp-hcp-infra
+that has one is `gecko-nodepool-upgrade`, a controller with no inbound traffic.
+For the sign-up service a correct policy needs this cluster's Gateway
+health-check and proxy-only ranges, the metadata server and Google API egress,
+and the pod and service CIDRs, none of which the chart can know, and a wrong
+ingress rule would take the service down. It should be designed and tested on a
+real cluster and added as an opt-in, values-driven template like that chart's,
+not guessed here.
