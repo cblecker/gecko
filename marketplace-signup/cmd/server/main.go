@@ -27,6 +27,13 @@ import (
 // APIs accept.
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
+// tokenRefreshTimeout bounds each OAuth token refresh. Credentials from a user
+// account (local development) refresh through an HTTP client with no timeout,
+// so a stalled token endpoint would block every request that shares the token
+// source. The deployed Workload Identity path goes through the metadata server,
+// which has its own timeouts.
+const tokenRefreshTimeout = 10 * time.Second
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
@@ -49,11 +56,11 @@ func run(logger *slog.Logger) error {
 	// One identity for every Google API call: the pod's Workload Identity
 	// service account, through Application Default Credentials.
 	ctx := context.Background()
-	tokens, err := google.DefaultTokenSource(ctx, cloudPlatformScope)
+	httpClient, err := newAuthenticatedClient(ctx, tokenRefreshTimeout)
 	if err != nil {
-		return fmt.Errorf("resolve default credentials: %w", err)
+		return err
 	}
-	deps := newDeps(cfg, oauth2.NewClient(ctx, tokens))
+	deps := newDeps(cfg, httpClient)
 
 	if deps.Notifier != nil {
 		logger.Info("activation notifications enabled",
@@ -99,6 +106,21 @@ func run(logger *slog.Logger) error {
 		logger.Info("shutting down")
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// newAuthenticatedClient returns an HTTP client that signs its requests with
+// Application Default Credentials. Each token refresh is bounded by
+// refreshTimeout; the API calls themselves are not, because they carry their own
+// deadlines (an activation legitimately waits for minutes).
+func newAuthenticatedClient(ctx context.Context, refreshTimeout time.Duration) (*http.Client, error) {
+	// oauth2.NewClient copies the timeout of the HTTP client in its context onto
+	// the client it returns, so the bounded client goes only to the token source.
+	refreshCtx := context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: refreshTimeout})
+	tokens, err := google.DefaultTokenSource(refreshCtx, cloudPlatformScope)
+	if err != nil {
+		return nil, fmt.Errorf("resolve default credentials: %w", err)
+	}
+	return oauth2.NewClient(ctx, tokens), nil
 }
 
 // newDeps wires the handler's collaborators from the configuration. The
