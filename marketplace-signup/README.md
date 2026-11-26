@@ -193,9 +193,10 @@ helm/charts/marketplace-signup/tests/render.sh
 
 The chart defines no NetworkPolicy yet. The only chart in Gecko or gcp-hcp-infra
 that has one is `gecko-nodepool-upgrade`, a controller with no inbound traffic.
-For the sign-up service a correct policy needs this cluster's Gateway
-health-check and proxy-only ranges, the metadata server and Google API egress,
-and the pod and service CIDRs, none of which the chart can know, and a wrong
-ingress rule would take the service down. It should be designed and tested on a
-real cluster and added as an opt-in, values-driven template like that chart's,
-not guessed here.
+The sign-up service sits behind the platform Gateway, a global external load
+balancer, so a correct policy has to admit the load balancer's health-check and
+proxy source ranges for ingress and allow DNS, the metadata server (Workload
+Identity) and Google API egress. That rule set can't be verified without a real
+cluster, and a wrong ingress rule would take the service down. It should be
+designed and tested on a real cluster and added as an opt-in, values-driven
+template like that chart's, not guessed here.
