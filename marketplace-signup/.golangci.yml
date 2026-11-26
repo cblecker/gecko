@@ -1,0 +1,53 @@
+version: "2"
+
+run:
+  allow-parallel-runners: true
+  timeout: 5m
+
+linters:
+  enable:
+    - dupword
+    - durationcheck
+    - errorlint
+    - fatcontext
+    - gocyclo
+    - misspell
+    - nilerr
+    - noctx
+    - unparam
+    - usestdlibvars
+    - errcheck
+    - unused
+  settings:
+    gocyclo:
+      min-complexity: 30
+    govet:
+      enable:
+        - nilness
+    misspell:
+      locale: US
+      # The Workflows Executions API spells its terminal state CANCELLED.
+      ignore-rules:
+        - cancelled
+  exclusions:
+    warn-unused: true
+    generated: lax
+    presets:
+      - std-error-handling
+
+severity:
+  default: error
+
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/openshift-online)
+      custom-order: true
+  exclusions:
+    warn-unused: true
+    generated: lax
