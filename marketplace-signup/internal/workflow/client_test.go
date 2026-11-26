@@ -10,6 +10,26 @@ import (
 	"time"
 )
 
+// writeBody writes a fake API response, reporting a failed write at its source
+// instead of leaving it to surface as a later, unrelated failure.
+func writeBody(t *testing.T, w http.ResponseWriter, body []byte) {
+	t.Helper()
+	if _, err := w.Write(body); err != nil {
+		t.Errorf("write response: %v", err)
+	}
+}
+
+// marshal encodes a fixture. It must be called from the test's goroutine, not
+// from an HTTP handler.
+func marshal(t *testing.T, v any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %T: %v", v, err)
+	}
+	return encoded
+}
+
 // fakeWorkflows returns a client backed by a local server that answers the
 // create call and then hands out the given execution states in order.
 func fakeWorkflows(t *testing.T, states []map[string]any) *Client {
@@ -33,15 +53,20 @@ func fakeWorkflows(t *testing.T, states []map[string]any) *Client {
 			if args["project_namespace"] != "my-project-123" || args["subject"] != "alice@redhat.com" {
 				t.Errorf("unexpected argument: %v", args)
 			}
-			_, _ = w.Write([]byte(`{"name":"projects/p/locations/r/executions/e1","state":"ACTIVE"}`))
+			writeBody(t, w, []byte(`{"name":"projects/p/locations/r/executions/e1","state":"ACTIVE"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/projects/p/locations/r/executions/e1":
 			idx := gets
 			if idx >= len(states) {
 				idx = len(states) - 1
 			}
 			gets++
-			body, _ := json.Marshal(states[idx])
-			_, _ = w.Write(body)
+			body, err := json.Marshal(states[idx])
+			if err != nil {
+				t.Errorf("marshal execution state: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			writeBody(t, w, body)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -159,7 +184,7 @@ func TestActivateFailureMapping(t *testing.T) {
 func TestActivateCreateFailureIsTransient(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":{"message":"internal"}}`))
+		writeBody(t, w, []byte(`{"error":{"message":"internal"}}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -176,7 +201,7 @@ func TestActivateCreateFailureIsTransient(t *testing.T) {
 func TestActivateCreateForbiddenIsMisconfigured(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":{"message":"caller lacks workflows.invoker"}}`))
+		writeBody(t, w, []byte(`{"error":{"message":"caller lacks workflows.invoker"}}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -201,27 +226,22 @@ func TestActivateTimesOut(t *testing.T) {
 
 func TestClassifyFailureOuterStringPayload(t *testing.T) {
 	// Real Executions API wraps the workflow's JSON in an outer JSON string.
-	outer409, _ := json.Marshal(map[string]any{"code": 409.0, "message": "exists"})
-	wrapped409, _ := json.Marshal(string(outer409))
+	outer409 := marshal(t, map[string]any{"code": 409.0, "message": "exists"})
+	wrapped409 := marshal(t, string(outer409))
 	if err := classifyFailure(&executionError{Payload: wrapped409, Context: "failed"}); !errors.Is(err, ErrAlreadyClaimed) {
 		t.Fatalf("wrapped 409: got %v, want ErrAlreadyClaimed", err)
 	}
-	outer403, _ := json.Marshal(map[string]any{"code": 403.0, "message": "reserved"})
-	wrapped403, _ := json.Marshal(string(outer403))
+	outer403 := marshal(t, map[string]any{"code": 403.0, "message": "reserved"})
+	wrapped403 := marshal(t, string(outer403))
 	if err := classifyFailure(&executionError{Payload: wrapped403, Context: "failed"}); !errors.Is(err, ErrReservedName) {
 		t.Fatalf("wrapped 403: got %v, want ErrReservedName", err)
 	}
-	// String payload wrapped as outer string should still classify as input validation
-	wrappedStr, _ := json.Marshal("Invalid project_namespace: expected a valid GCP project ID")
-	// Need double wrapping: inner string already JSON, outer wraps it
-	outerStr, _ := json.Marshal(string(wrappedStr))
-	// The actual wire format for string payloads is a single outer string
-	// containing the message; test the direct wrapped string case
-	directWrapped, _ := json.Marshal("Invalid project_namespace: bad")
+	// The wire format for a plain-string payload is a single outer string
+	// containing the message; it classifies as input validation.
+	directWrapped := marshal(t, "Invalid project_namespace: bad")
 	if err := classifyFailure(&executionError{Payload: directWrapped, Context: "failed"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("wrapped input validation: got %v, want ErrInvalidInput", err)
 	}
-	_ = outerStr
 }
 
 func TestActivatePollRetriesTransientThenSucceeds(t *testing.T) {
@@ -244,13 +264,16 @@ func TestActivatePollRetriesTransientThenSucceeds(t *testing.T) {
 				}
 				return
 			}
-			body, _ := json.Marshal(map[string]any{
+			body, err := json.Marshal(map[string]any{
 				"name": "e1", "state": "SUCCEEDED",
 				"result": `{"status":"activated","namespace":"my-project-123"}`,
 			})
-			if _, err := w.Write(body); err != nil {
-				t.Errorf("write success: %v", err)
+			if err != nil {
+				t.Errorf("marshal success: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
 			}
+			writeBody(t, w, body)
 			return
 		}
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)

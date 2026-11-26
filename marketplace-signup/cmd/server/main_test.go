@@ -41,6 +41,15 @@ func testConfig() config.Config {
 	}
 }
 
+// writeBody writes a fake API response, reporting a failed write at its source
+// instead of leaving it to surface as a later, unrelated failure.
+func writeBody(t *testing.T, w http.ResponseWriter, body string) {
+	t.Helper()
+	if _, err := io.WriteString(w, body); err != nil {
+		t.Errorf("write response: %v", err)
+	}
+}
+
 type fakeVerifier struct{}
 
 func (fakeVerifier) Verify(context.Context, string) (auth.Identity, error) {
@@ -89,9 +98,9 @@ func TestActivationAndNotificationTargetDifferentProjects(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/projects/"+leaderProject+"/locations/"+leaderRegion+"/workflows/activate-project/executions":
-			_, _ = w.Write([]byte(`{"name":"` + execution + `","state":"ACTIVE"}`))
+			writeBody(t, w, `{"name":"`+execution+`","state":"ACTIVE"}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/"+execution:
-			_, _ = w.Write([]byte(`{"state":"SUCCEEDED","result":"{\"status\":\"activated\",\"namespace\":\"` + customerProject + `\"}"}`))
+			writeBody(t, w, `{"state":"SUCCEEDED","result":"{\"status\":\"activated\",\"namespace\":\"`+customerProject+`\"}"}`)
 		default:
 			t.Errorf("workflow API got an unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -112,7 +121,7 @@ func TestActivationAndNotificationTargetDifferentProjects(t *testing.T) {
 			t.Errorf("decode notification request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
+		writeBody(t, w, `{}`)
 		close(notified)
 	}))
 	t.Cleanup(notifier.Close)

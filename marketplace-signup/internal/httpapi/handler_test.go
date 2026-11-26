@@ -30,6 +30,16 @@ const (
 	leaderProject = "leader-project-1"
 )
 
+// newPolicy builds the Red Hat hosted-domain policy the tests run under.
+func newPolicy(t *testing.T) *identity.Policy {
+	t.Helper()
+	policy, err := identity.NewPolicy([]string{"redhat.com"})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	return policy
+}
+
 type fakeVerifier struct {
 	id  auth.Identity
 	err error
@@ -82,10 +92,7 @@ func newPipeline(t *testing.T, tweak func(*pipeline)) *pipeline {
 	if tweak != nil {
 		tweak(p)
 	}
-	policy, err := identity.NewPolicy([]string{"redhat.com"})
-	if err != nil {
-		t.Fatalf("NewPolicy: %v", err)
-	}
+	policy := newPolicy(t)
 	// Assign the notifier only when set: a typed-nil *fakeNotifier would make
 	// the Notifier interface non-nil and panic in the handler's goroutine.
 	deps := Deps{Verifier: p.verifier, Activator: p.activator}
@@ -418,10 +425,7 @@ func TestMessagesCoverAllCodes(t *testing.T) {
 
 func newCORSPipeline(t *testing.T) http.Handler {
 	t.Helper()
-	policy, err := identity.NewPolicy([]string{"redhat.com"})
-	if err != nil {
-		t.Fatalf("NewPolicy: %v", err)
-	}
+	policy := newPolicy(t)
 	return NewHandler(
 		config.Config{OAuthClientID: "test-client", AllowedOrigin: "https://signup.example.test"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -479,7 +483,7 @@ func TestCORSHeadersOnActualRequest(t *testing.T) {
 
 func TestSignupRejectedIncludesAuditFields(t *testing.T) {
 	var buf bytes.Buffer
-	policy, _ := identity.NewPolicy([]string{"redhat.com"})
+	policy := newPolicy(t)
 	h := NewHandler(
 		config.Config{OAuthClientID: "test-client"},
 		slog.New(slog.NewTextHandler(&buf, nil)),
@@ -504,7 +508,7 @@ func TestSignupRejectedIncludesAuditFields(t *testing.T) {
 func TestSignupNormalizeBeforeAuthorize(t *testing.T) {
 	// NFC normalization: decomposed e + combining accent should normalize and pass.
 	decomposed := "alice\u0065\u0301@redhat.com" // e + ́ -> é in NFC
-	policy, _ := identity.NewPolicy([]string{"redhat.com"})
+	policy := newPolicy(t)
 	h := NewHandler(
 		config.Config{OAuthClientID: "test-client"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
