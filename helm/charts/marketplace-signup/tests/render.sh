@@ -99,6 +99,10 @@ for mount in /var/cache/nginx /usr/share/nginx/html /tmp; do
 done
 [ "$(grep -c 'emptyDir: {}' "$tmp_dir/spa.yaml")" = 3 ] || fail "the SPA's three volumes must be emptyDir"
 
+# The ServiceAccount sets the same default, so a pod added later inherits it.
+render_one serviceaccount.yaml > "$tmp_dir/service-account.yaml"
+expect "$tmp_dir/service-account.yaml" 'automountServiceAccountToken: false' "ServiceAccount token mount"
+
 # Health: probes and the Gateway's health checks.
 expect "$tmp_dir/backend.yaml" 'path: /healthz' "backend probes"
 expect "$tmp_dir/spa.yaml" 'path: /index.html' "SPA probes"
