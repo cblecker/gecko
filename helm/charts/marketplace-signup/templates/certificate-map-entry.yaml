@@ -1,0 +1,32 @@
+{{- if .Values.enabled }}
+{{- if .Values.certificate.enabled }}
+apiVersion: certificatemanager.cnrm.cloud.google.com/v1beta1
+kind: CertificateManagerCertificateMapEntry
+metadata:
+  {{- $sanitized := .Values.gateway.hostname | replace "." "-" }}
+  {{- if gt (len $sanitized) 63 }}
+  {{- $hash := .Values.gateway.hostname | sha256sum | trunc 8 }}
+  {{- $prefix := $sanitized | trunc 54 | trimSuffix "-" }}
+  name: {{ printf "%s-%s" $prefix $hash }}
+  {{- else }}
+  name: {{ $sanitized }}
+  {{- end }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: marketplace-signup
+    app.kubernetes.io/component: certificate-map-entry
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # The entry references the certificate, so it must be created after it.
+    argocd.argoproj.io/sync-wave: "2"
+    cnrm.cloud.google.com/depends-on: CertificateManagerCertificate/{{ .Values.certificate.name }}
+spec:
+  mapRef:
+    external: {{ .Values.certificate.certificateMap.name }}
+  hostname: {{ .Values.gateway.hostname }}
+  certificatesRefs:
+    - external: projects/{{ .Values.gcp.projectId }}/locations/global/certificates/{{ .Values.certificate.name }}
+  projectRef:
+    external: {{ .Values.gcp.projectId }}
+{{- end }}
+{{- end }}

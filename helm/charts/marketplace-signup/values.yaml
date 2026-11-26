@@ -1,0 +1,90 @@
+# Interim marketplace sign-up service: a Go backend and a static SPA served on
+# one hostname behind the regional Gateway. It stores no secrets; the backend
+# calls Google APIs as its Workload Identity service account.
+#
+# Disabled by default: the chart renders nothing until an environment sets
+# enabled: true and the settings marked "required" below.
+enabled: false
+
+image:
+  registry: us-docker.pkg.dev
+  repository: gcp-hcp-commons/gcp-hcp-images/gecko-marketplace-signup-backend
+  tag: "" # required
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# Static SPA, served on the API's hostname so there is no CORS.
+spa:
+  image:
+    registry: us-docker.pkg.dev
+    repository: gcp-hcp-commons/gcp-hcp-images/gecko-marketplace-signup-frontend
+    tag: "" # required
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+
+gcp:
+  # Project that hosts the Certificate Manager resources (required when
+  # certificate.enabled).
+  projectId: ""
+
+serviceAccount:
+  # Must match the Kubernetes service account in the Workload Identity binding
+  # that the environment's infrastructure creates.
+  name: signup-backend
+  # GSA the pod impersonates through Workload Identity, for example
+  # signup-backend@<service-project>.iam.gserviceaccount.com (required).
+  gcpServiceAccount: ""
+
+config:
+  # Dedicated Google Identity Services Web client ID. Public, not a secret
+  # (required).
+  oauthClientId: ""
+  allowedEmailDomains: "redhat.com"
+  # Only for a split-origin deployment. Empty allows same-origin requests only,
+  # which is the normal case: the SPA and API share one hostname.
+  allowedOrigin: ""
+
+  # Where the activate-project workflow runs: the current authorization leader's
+  # project and region (required). The leader project is also reported in every
+  # notification.
+  workflowProjectId: ""
+  workflowRegion: ""
+  workflowName: activate-project
+
+  # Per-activation email through an Application Integration. Empty disables
+  # notifications. When set, the integration's own project and region are
+  # required: they locate the environment's fixed hosting project and do not
+  # follow the workflow's.
+  notifyIntegration: ""
+  notifyProjectId: ""
+  notifyRegion: ""
+
+  # Empty means the SPA calls the API on its own origin (recommended). Otherwise
+  # it must be https://<name>.gcp-hcp.devshift.net: the page's
+  # Content-Security-Policy allows nothing else, and the container refuses to
+  # start on any other value.
+  apiBase: ""
+
+service:
+  port: 80
+  targetPort: 8080
+
+gateway:
+  name: platform-external-gateway
+  namespace: platform-gateway
+  hostname: "" # required
+
+certificate:
+  enabled: true
+  name: signup-api-cert
+  certificateMap:
+    name: platform-gateway-certmap
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

@@ -1,0 +1,86 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signup-spa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: marketplace-signup
+    app.kubernetes.io/component: spa
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.spa.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: marketplace-signup
+      app.kubernetes.io/component: spa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: marketplace-signup
+        app.kubernetes.io/component: spa
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: spa
+          image: "{{ .Values.spa.image.registry }}/{{ .Values.spa.image.repository }}:{{ .Values.spa.image.tag }}"
+          imagePullPolicy: {{ .Values.spa.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SIGNUP_CLIENT_ID
+              value: {{ .Values.config.oauthClientId | quote }}
+            - name: SIGNUP_API_BASE
+              value: {{ .Values.config.apiBase | quote }}
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /index.html
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          # At or above the GKE Autopilot minimum (50m CPU, 52Mi memory):
+          # below it, the admission mutator raises the values and ArgoCD then
+          # reports a permanent OutOfSync diff.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: html
+              mountPath: /usr/share/nginx/html
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        # The SPA is rendered here at start-up (read-only root filesystem).
+        - name: html
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+{{- end }}
