@@ -79,8 +79,11 @@ expect "$tmp_dir/spa.yaml" 'image: "us-docker.pkg.dev/gcp-hcp-commons/gcp-hcp-im
 [ "$(env_value "$tmp_dir/backend.yaml" NOTIFY_REGION)" = us-central1 ] || fail "NOTIFY_REGION"
 
 # Both pods run unprivileged with a read-only root filesystem, no capabilities
-# and the runtime's default seccomp profile.
+# and the runtime's default seccomp profile, and neither mounts a Kubernetes API
+# token: the backend authenticates to Google through Workload Identity and the
+# SPA has no cloud identity at all.
 for workload in backend spa; do
+	expect "$tmp_dir/$workload.yaml" 'automountServiceAccountToken: false' "$workload service account token"
 	expect "$tmp_dir/$workload.yaml" 'runAsNonRoot: true' "$workload runAsNonRoot"
 	expect "$tmp_dir/$workload.yaml" 'runAsUser: 65532' "$workload runAsUser"
 	expect "$tmp_dir/$workload.yaml" 'type: RuntimeDefault' "$workload seccomp profile"
@@ -88,8 +91,6 @@ for workload in backend spa; do
 	expect "$tmp_dir/$workload.yaml" 'allowPrivilegeEscalation: false' "$workload privilege escalation"
 	expect "$tmp_dir/$workload.yaml" '- ALL' "$workload capabilities dropped"
 done
-# The SPA needs no cloud identity or API access.
-expect "$tmp_dir/spa.yaml" 'automountServiceAccountToken: false' "SPA service account token"
 # The SPA writes only to its three volumes. They must be emptyDir: the kubelet
 # creates those world-writable, which is what lets UID 65532 write to them
 # without an fsGroup. Another volume type would need that reconsidered.

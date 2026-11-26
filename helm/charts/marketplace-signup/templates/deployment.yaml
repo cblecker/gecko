@@ -22,6 +22,10 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
+      # The backend reaches Google APIs through Workload Identity, where the GKE
+      # metadata server obtains the Kubernetes token itself, and it never calls
+      # the Kubernetes API, so the pod needs no mounted token.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
