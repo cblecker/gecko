@@ -35,7 +35,7 @@ require (
 	cloud.google.com/go/iam v1.15.1 // indirect
 	cloud.google.com/go/longrunning v1.5.0 // indirect
 	cloud.google.com/go/monitoring v1.32.1 // indirect
-	cloud.google.com/go/spanner v1.96.1 // indirect
+	cloud.google.com/go/spanner v1.96.2 // indirect
 	connectrpc.com/connect v1.21.1 // indirect
 	connectrpc.com/connect/v2 v2.0.2 // indirect
 	connectrpc.com/otelconnect v0.12.0 // indirect
