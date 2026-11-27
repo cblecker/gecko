@@ -38,8 +38,8 @@ func TestLoadMissingRequired(t *testing.T) {
 func TestLoadNormalizesDomainList(t *testing.T) {
 	env := map[string]string{
 		"OAUTH_CLIENT_ID":       "c",
-		"WORKFLOW_PROJECT_ID":   "p",
-		"WORKFLOW_REGION":       "r",
+		"WORKFLOW_PROJECT_ID":   "leader-project-1",
+		"WORKFLOW_REGION":       "us-east1",
 		"ALLOWED_EMAIL_DOMAINS": " RedHat.com , redhat.com ,partners.example ",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -107,6 +107,33 @@ func TestLoadNotificationRequiresItsOwnCoordinates(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %s", err.Error(), want)
 		}
+	}
+}
+
+// A typo in the workflow's coordinates fails at startup. Otherwise every
+// sign-up would fail as a transient error that retrying never fixes.
+func TestLoadRejectsMalformedWorkflowCoordinates(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, value string
+	}{
+		{"project too short", "WORKFLOW_PROJECT_ID", "tiny"},
+		{"project uppercase", "WORKFLOW_PROJECT_ID", "Leader-Project-1"},
+		{"project with a path", "WORKFLOW_PROJECT_ID", "leader-project/../x"},
+		{"region without a number", "WORKFLOW_REGION", "us-east"},
+		{"region with a path", "WORKFLOW_REGION", "us-east1/../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := baseEnv()
+			env[tc.key] = tc.value
+
+			_, err := load(env)
+			if err == nil {
+				t.Fatalf("Load accepted %s=%q", tc.key, tc.value)
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("error %q does not name %s", err.Error(), tc.key)
+			}
+		})
 	}
 }
 

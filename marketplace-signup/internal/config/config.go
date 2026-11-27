@@ -1,6 +1,7 @@
 // Package config loads and validates the backend's configuration from the
-// environment. Every value is required unless a documented default applies;
-// nothing has a hardcoded fallback for identity-bearing settings.
+// environment. Every value is required unless a documented default applies.
+// The only identity-bearing default is the restrictive one:
+// ALLOWED_EMAIL_DOMAINS falls back to redhat.com, and the chart always sets it.
 package config
 
 import (
@@ -109,9 +110,17 @@ func Load(getenv Getenv) (Config, error) {
 		return Config{}, fmt.Errorf("missing required configuration: %s", strings.Join(missing, ", "))
 	}
 
-	// Validate the notification destination even when it is unused, so a typo
-	// surfaces at startup rather than when notifications are first enabled.
+	// Validate the coordinates' format, so a typo fails at startup instead of
+	// failing every sign-up as a transient error. The notification destination
+	// is checked even when it is unused, so a typo surfaces before notifications
+	// are first enabled.
 	var malformed []string
+	if !projectIDPattern.MatchString(cfg.WorkflowProjectID) {
+		malformed = append(malformed, "WORKFLOW_PROJECT_ID (expected a GCP project ID)")
+	}
+	if !regionPattern.MatchString(cfg.WorkflowRegion) {
+		malformed = append(malformed, "WORKFLOW_REGION (expected a GCP region such as us-central1)")
+	}
 	if cfg.NotifyProjectID != "" && !projectIDPattern.MatchString(cfg.NotifyProjectID) {
 		malformed = append(malformed, "NOTIFY_PROJECT_ID (expected a GCP project ID)")
 	}

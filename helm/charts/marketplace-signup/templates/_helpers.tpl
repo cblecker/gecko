@@ -10,6 +10,12 @@ send mail to the wrong place. The backend validates the same values at startup.
 {{- $_ := required "config.oauthClientId is required" .Values.config.oauthClientId -}}
 {{- $_ := required "config.workflowProjectId is required" .Values.config.workflowProjectId -}}
 {{- $_ := required "config.workflowRegion is required" .Values.config.workflowRegion -}}
+{{- if not (regexMatch "^[a-z][a-z0-9-]{4,28}[a-z0-9]$" .Values.config.workflowProjectId) -}}
+{{- fail (printf "config.workflowProjectId is not a valid GCP project ID: %q" .Values.config.workflowProjectId) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z]+-[a-z]+[0-9]+$" .Values.config.workflowRegion) -}}
+{{- fail (printf "config.workflowRegion is not a valid GCP region: %q" .Values.config.workflowRegion) -}}
+{{- end -}}
 {{- if .Values.certificate.enabled -}}
 {{- $_ := required "gcp.projectId is required when certificate.enabled" .Values.gcp.projectId -}}
 {{- end -}}

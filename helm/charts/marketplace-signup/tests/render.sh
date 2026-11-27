@@ -148,6 +148,8 @@ rejects serviceAccount.gcpServiceAccount --set serviceAccount.gcpServiceAccount=
 rejects config.oauthClientId --set config.oauthClientId=
 rejects config.workflowProjectId --set config.workflowProjectId=
 rejects config.workflowRegion --set config.workflowRegion=
+rejects config.workflowProjectId --set config.workflowProjectId=Bad_Project
+rejects config.workflowRegion --set config.workflowRegion=us-east
 # The notifier never falls back to the workflow's project and region.
 rejects config.notifyProjectId --set config.notifyProjectId=
 rejects config.notifyRegion --set config.notifyRegion=
