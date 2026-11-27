@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/openshift-online/gecko/marketplace-signup/internal/apierror"
 )
 
 const (
@@ -111,8 +113,7 @@ func (c *Client) Notify(ctx context.Context, activation Activation) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("execute integration: HTTP %d: %s", resp.StatusCode, snippet)
+		return fmt.Errorf("execute integration: %s", apierror.Describe(resp))
 	}
 
 	// The response body is large execution metadata; drain a bounded amount

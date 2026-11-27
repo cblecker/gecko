@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -201,7 +202,7 @@ func TestActivateCreateFailureIsTransient(t *testing.T) {
 func TestActivateCreateForbiddenIsMisconfigured(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		writeBody(t, w, []byte(`{"error":{"message":"caller lacks workflows.invoker"}}`))
+		writeBody(t, w, []byte(`{"error":{"code":403,"status":"PERMISSION_DENIED","message":"caller lacks workflows.invoker"}}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -210,8 +211,13 @@ func TestActivateCreateForbiddenIsMisconfigured(t *testing.T) {
 		HTTP: srv.Client(), BaseURL: srv.URL,
 		Timeout: time.Second, PollInterval: time.Millisecond,
 	}
-	if _, err := c.Activate(context.Background(), "my-project-123", "alice@redhat.com"); !errors.Is(err, ErrMisconfigured) {
+	_, err := c.Activate(context.Background(), "my-project-123", "alice@redhat.com")
+	if !errors.Is(err, ErrMisconfigured) {
 		t.Fatalf("error = %v, want ErrMisconfigured", err)
+	}
+	// The handler logs this error: it carries the status codes, never the body.
+	if msg := err.Error(); !strings.HasSuffix(msg, "create execution: HTTP 403 PERMISSION_DENIED") || strings.Contains(msg, "lacks") {
+		t.Errorf("error = %q, want the status codes without the response body", msg)
 	}
 }
 

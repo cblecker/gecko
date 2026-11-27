@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/openshift-online/gecko/marketplace-signup/internal/apierror"
 )
 
 const (
@@ -227,11 +229,13 @@ func classifyPayload(raw []byte) error {
 // statusError is an HTTP failure from the Workflows API.
 type statusError struct {
 	code int
-	body string
+	// summary describes the response without its body (see apierror.Describe):
+	// the error is logged.
+	summary string
 }
 
 func (e *statusError) Error() string {
-	return fmt.Sprintf("HTTP %d: %s", e.code, e.body)
+	return e.summary
 }
 
 // isAuthorizationFailure reports whether err means the backend itself is not
@@ -280,8 +284,7 @@ func (c *Client) do(ctx context.Context, method, url string, body []byte, out an
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return &statusError{code: resp.StatusCode, body: strings.TrimSpace(string(snippet))}
+		return &statusError{code: resp.StatusCode, summary: apierror.Describe(resp)}
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, maxResponseBody)).Decode(out)
 }

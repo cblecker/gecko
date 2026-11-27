@@ -113,11 +113,16 @@ func TestNotifyEscapesPathElements(t *testing.T) {
 
 func TestNotifySurfacesHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"error":{"code":403}}`, http.StatusForbidden)
+		http.Error(w, `{"error":{"code":403,"status":"PERMISSION_DENIED","message":"denied for alice@redhat.com"}}`, http.StatusForbidden)
 	}))
 	defer srv.Close()
 
-	if err := newTestClient(srv).Notify(context.Background(), testActivation()); err == nil {
+	err := newTestClient(srv).Notify(context.Background(), testActivation())
+	if err == nil {
 		t.Fatal("Notify: expected error for HTTP 403, got nil")
+	}
+	// The handler logs this error: it carries the status codes, never the body.
+	if got, want := err.Error(), "execute integration: HTTP 403 PERMISSION_DENIED"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
 	}
 }
