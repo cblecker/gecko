@@ -210,6 +210,8 @@ func classifyPayload(raw []byte) error {
 	}
 	if err := json.Unmarshal(raw, &obj); err == nil {
 		switch obj.Code {
+		case 400:
+			return fmt.Errorf("%w: %s", ErrInvalidInput, obj.Message)
 		case 403:
 			return fmt.Errorf("%w: %s", ErrReservedName, obj.Message)
 		case 409:
@@ -249,6 +251,10 @@ func isAuthorizationFailure(err error) bool {
 	return false
 }
 
+// isInputValidation recognizes activate-project's input errors by their
+// wording, because the workflow raises them as plain strings. A raise with code
+// 400 is recognized by its code instead (see classifyPayload), which survives
+// rewording: prefer that when the workflow next changes.
 func isInputValidation(message string) bool {
 	for _, prefix := range []string{
 		"Missing or empty required parameter",

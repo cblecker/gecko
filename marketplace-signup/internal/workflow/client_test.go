@@ -145,6 +145,15 @@ func TestActivateFailureMapping(t *testing.T) {
 			want: ErrInvalidInput,
 		},
 		{
+			// Recognized by its code, whatever the wording.
+			name: "input validation raise with code 400",
+			exec: map[string]any{
+				"name": "e1", "state": "FAILED",
+				"error": map[string]any{"payload": map[string]any{"code": 400.0, "message": "project namespace is not a valid ID"}},
+			},
+			want: ErrInvalidInput,
+		},
+		{
 			name: "role unavailable is transient",
 			exec: map[string]any{
 				"name": "e1", "state": "FAILED",
