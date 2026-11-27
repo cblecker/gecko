@@ -23,6 +23,8 @@ generator workflow, treat that referenced file as the authoritative procedure.
 | Platform API setup and local server | `platform-api/README.md` |
 | Platform API architecture | `platform-api/ARCHITECTURE.md` |
 | Orlop architecture | `orlop/ARCHITECTURE.md` |
+| Marketplace sign-up guidance | `marketplace-signup/AGENTS.md` |
+| Marketplace sign-up overview | `marketplace-signup/README.md` |
 | Public API generation rules | `platform-api/api/public/README.md` |
 | Generation tooling | `hack/README.md` |
 | API aggregation status | `api-aggregation-status.md` |
@@ -34,6 +36,7 @@ generator workflow, treat that referenced file as the authoritative procedure.
 | `orlop/` | Reusable API server, routing, schema processing, storage, and code generation |
 | `platform-api/` | GCP HCP API definitions and private/public API server |
 | `controllers/` | Reconcilers that act on platform API resources |
+| `marketplace-signup/` | Interim self-service sign-up: Go backend and static SPA, with its own chart and images |
 | `helm/` | Helm packaging for Gecko services and controllers |
 | `deploy/` | Local and cluster deployment manifests |
 | `hack/` | Shared linting and generation support |
@@ -49,7 +52,7 @@ repository root.
 | Format all modules | `make lint-fmt` |
 | Test all modules | `make test` |
 | Lint all modules | `make lint` |
-| Test one module | `make -C orlop test`, `make -C platform-api test`, or `make -C controllers test` |
+| Test one module | `make -C orlop test`, `make -C platform-api test`, `make -C controllers test`, or `make -C marketplace-signup test` |
 | Run focused tests | Run `go test ./path/...` from the owning module directory |
 | Generate platform APIs | `make -C platform-api generate` |
 | Generate Orlop artifacts | `make -C orlop generate` |

@@ -1,0 +1,37 @@
+{{- if .Values.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: marketplace-signup-route
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: marketplace-signup
+    app.kubernetes.io/component: route
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # External-DNS publishes the A record from the Gateway's address.
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.gateway.hostname }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Values.gateway.namespace }}
+      sectionName: https
+  hostnames:
+    - {{ .Values.gateway.hostname }}
+  rules:
+    # API first: /api/* must not fall through to the SPA's catch-all.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/
+      backendRefs:
+        - name: signup-backend
+          port: {{ .Values.service.port }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: signup-spa
+          port: {{ .Values.service.port }}
+{{- end }}

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: marketplace-signup
+description: Interim marketplace sign-up SPA and backend behind the regional Gateway
+type: application
+version: 0.1.0
+appVersion: "0.0.1-dev"
+maintainers:
+  - name: GCP HCP Team
+keywords:
+  - gecko
+  - marketplace
+  - signup
+home: https://github.com/openshift-online/gecko

@@ -1,0 +1,27 @@
+{{- if .Values.enabled }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: marketplace-signup-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: marketplace-signup
+    app.kubernetes.io/component: health-check
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: signup-backend
+  default:
+    checkIntervalSec: 10
+    timeoutSec: 5
+    healthyThreshold: 2
+    unhealthyThreshold: 3
+    config:
+      type: HTTP
+      httpHealthCheck:
+        # Health checks go straight to the pod, not through the Service port.
+        portSpecification: USE_SERVING_PORT
+        requestPath: /healthz
+{{- end }}

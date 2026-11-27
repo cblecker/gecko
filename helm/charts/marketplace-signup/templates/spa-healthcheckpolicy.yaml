@@ -1,0 +1,26 @@
+{{- if .Values.enabled }}
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: marketplace-signup-spa-health-check
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: marketplace-signup
+    app.kubernetes.io/component: spa-health-check
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: signup-spa
+  default:
+    checkIntervalSec: 10
+    timeoutSec: 5
+    healthyThreshold: 2
+    unhealthyThreshold: 3
+    config:
+      type: HTTP
+      httpHealthCheck:
+        portSpecification: USE_SERVING_PORT
+        requestPath: /index.html
+{{- end }}
