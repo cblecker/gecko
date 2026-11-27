@@ -3,9 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- This page handles sign-in tokens: keep it out of frames and limit
-       scripts/connections to itself, Google Identity Services, and the API. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com; connect-src 'self' https://*.gcp-hcp.devshift.net https://accounts.google.com; frame-src https://accounts.google.com; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+  <!-- This page handles sign-in tokens: limit scripts and connections to
+       itself, Google Identity Services and the API. Framing is denied by the
+       frame-ancestors header that nginx sends: browsers ignore that directive
+       in a meta policy. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com; connect-src 'self' https://*.gcp-hcp.devshift.net https://accounts.google.com; frame-src https://accounts.google.com; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data:; base-uri 'none'; form-action 'self'">
   <title>GCP HCP sign-up</title>
   <link rel="stylesheet" href="styles.css">
   <!-- Filled in at container start by entrypoint.sh. Public values only: the

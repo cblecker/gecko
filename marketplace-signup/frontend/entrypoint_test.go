@@ -151,6 +151,14 @@ func TestCSPAllowsGoogleIdentityServicesWithoutUnsafeSources(t *testing.T) {
 	}
 }
 
+// Browsers ignore frame-ancestors in a meta policy and warn about it on every
+// load. Framing is denied by the header that nginx sends (see nginx_test.go).
+func TestMetaPolicyLeavesFramingToTheHeader(t *testing.T) {
+	if sources, ok := contentSecurityPolicy(t)["frame-ancestors"]; ok {
+		t.Errorf("the meta policy sets frame-ancestors %v, which browsers ignore there", sources)
+	}
+}
+
 // Without 'unsafe-inline', the policy blocks inline scripts, styles and
 // event-handler attributes: the browser would never run them. All code must
 // live in app.js and styles.css.
