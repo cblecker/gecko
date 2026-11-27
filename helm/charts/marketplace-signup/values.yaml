@@ -74,6 +74,10 @@ gateway:
   name: platform-external-gateway
   namespace: platform-gateway
   hostname: "" # required
+  # The load balancer's timeout for sign-up API requests, in seconds. It must
+  # cover the backend's longest request: up to 25 seconds of identity checks and
+  # up to 3 minutes of activation. 240 matches the backend's write timeout.
+  backendTimeoutSec: 240
 
 certificate:
   enabled: true

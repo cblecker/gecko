@@ -80,7 +80,8 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// Activations wait on the workflow (bounded by its own 3-minute
-		// timeout), so the write deadline must exceed that.
+		// timeout), so the write deadline must exceed that. The Gateway's
+		// backend timeout (the chart's gateway.backendTimeoutSec) matches it.
 		WriteTimeout: 4 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}

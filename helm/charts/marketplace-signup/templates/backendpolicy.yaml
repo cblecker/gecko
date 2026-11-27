@@ -1,0 +1,21 @@
+{{- if .Values.enabled }}
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: marketplace-signup-backend-policy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: marketplace-signup
+    app.kubernetes.io/component: backend-policy
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: signup-backend
+  default:
+    # GKE's default backend timeout is 30 seconds, shorter than a sign-up can
+    # legitimately take. Past it, the browser gets a timeout while the
+    # activation goes on.
+    timeoutSec: {{ .Values.gateway.backendTimeoutSec }}
+{{- end }}

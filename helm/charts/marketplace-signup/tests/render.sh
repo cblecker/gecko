@@ -57,12 +57,13 @@ fi
 
 # Enabled: both workloads and their routing exist.
 render "${valid[@]}" > "$tmp_dir/all.yaml"
-for kind in Deployment Service ServiceAccount HTTPRoute HealthCheckPolicy \
+for kind in Deployment Service ServiceAccount HTTPRoute HealthCheckPolicy GCPBackendPolicy \
 	CertificateManagerCertificate CertificateManagerCertificateMapEntry; do
 	grep -q "^kind: $kind$" "$tmp_dir/all.yaml" || fail "no $kind rendered"
 done
 [ "$(grep -c '^kind: Deployment$' "$tmp_dir/all.yaml")" = 2 ] || fail "expected two Deployments"
 [ "$(grep -c '^kind: HealthCheckPolicy$' "$tmp_dir/all.yaml")" = 2 ] || fail "expected two HealthCheckPolicies"
+[ "$(grep -c '^kind: GCPBackendPolicy$' "$tmp_dir/all.yaml")" = 1 ] || fail "expected one GCPBackendPolicy, for the backend"
 
 # Images use the Gecko registry/repository:tag convention and the GAR defaults.
 render_one deployment.yaml > "$tmp_dir/backend.yaml"
@@ -111,6 +112,12 @@ render_one spa-healthcheckpolicy.yaml > "$tmp_dir/spa-hc.yaml"
 expect "$tmp_dir/backend-hc.yaml" 'requestPath: /healthz' "backend Gateway health check"
 expect "$tmp_dir/spa-hc.yaml" 'requestPath: /index.html' "SPA Gateway health check"
 
+# Timeout: the Gateway waits as long as the backend's longest request, not
+# GKE's 30-second default.
+render_one backendpolicy.yaml > "$tmp_dir/backend-policy.yaml"
+expect "$tmp_dir/backend-policy.yaml" 'name: signup-backend' "backend timeout policy target"
+expect "$tmp_dir/backend-policy.yaml" 'timeoutSec: 240$' "backend timeout"
+
 # Routing: /api/ must be matched before the SPA's catch-all.
 render_one httproute.yaml > "$tmp_dir/route.yaml"
 api_line=$(grep -n 'value: /api/$' "$tmp_dir/route.yaml" | cut -d: -f1 || true)
@@ -148,5 +155,8 @@ rejects config.notifyProjectId --set config.notifyProjectId=Bad_Project
 rejects config.notifyProjectId --set config.notifyProjectId=ends-with-hyphen-
 rejects config.notifyRegion --set config.notifyRegion=US-CENTRAL1
 rejects config.notifyRegion --set config.notifyRegion=us-central
+rejects gateway.backendTimeoutSec --set gateway.backendTimeoutSec=0
+rejects gateway.backendTimeoutSec --set gateway.backendTimeoutSec=1.5
+rejects gateway.backendTimeoutSec --set gateway.backendTimeoutSec=abc
 
 echo 'marketplace-signup chart tests passed.'

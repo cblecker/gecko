@@ -27,4 +27,7 @@ send mail to the wrong place. The backend validates the same values at startup.
 {{- fail (printf "config.notifyRegion is not a valid GCP region: %q" .Values.config.notifyRegion) -}}
 {{- end -}}
 {{- end -}}
+{{- if not (regexMatch "^[1-9][0-9]*$" (toString .Values.gateway.backendTimeoutSec)) -}}
+{{- fail (printf "gateway.backendTimeoutSec must be a whole number of seconds: %v" .Values.gateway.backendTimeoutSec) -}}
+{{- end -}}
 {{- end -}}
