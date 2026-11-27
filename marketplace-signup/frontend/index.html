@@ -15,14 +15,7 @@
         data-client-id=""
         data-api-base=""
         data-hosted-domain-hint="redhat.com">
-  <script>
-    // Set when the Google Identity Services script fails to load (blocked by an
-    // extension, a proxy, or an offline network). The app shows a visible
-    // explanation instead of an empty button slot.
-    window.__gsiLoadFailed = false;
-  </script>
-  <script src="https://accounts.google.com/gsi/client" async defer
-          onerror="window.__gsiLoadFailed = true; window.dispatchEvent(new Event('gsi-failed'))"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main class="card">

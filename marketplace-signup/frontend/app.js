@@ -311,7 +311,10 @@
     }
     // An empty apiBase is valid: the API is on the same origin as the page.
     // Only a missing client ID means the configuration did not load.
-    if (window.__gsiLoadFailed || !window.google || !google.accounts) {
+    // Google Identity Services is missing when its script failed to load
+    // (blocked by an extension, a proxy or an offline network): explain that
+    // instead of leaving an empty button slot.
+    if (!window.google || !google.accounts) {
       document.getElementById("gsi-fallback").hidden = false;
       fail("Google sign-in could not be loaded. Check your connection and reload.");
       return;
@@ -330,16 +333,12 @@
     });
     revealButtonWhenPainted();
 
-    window.addEventListener("gsi-failed", () => {
-      document.getElementById("gsi-fallback").hidden = false;
-      fail("Google sign-in could not be loaded. Check your connection and reload.");
-    });
-
     form.addEventListener("submit", submit);
     switchAccountButton.addEventListener("click", switchAccount);
   }
 
-  // The GIS library is loaded with `defer`; wait for the load event.
+  // The GIS library loads asynchronously, and the load event waits until it has
+  // loaded or failed.
   if (document.readyState === "complete") {
     init();
   } else {

@@ -151,6 +151,22 @@ func TestCSPAllowsGoogleIdentityServicesWithoutUnsafeSources(t *testing.T) {
 	}
 }
 
+// Without 'unsafe-inline', the policy blocks inline scripts, styles and
+// event-handler attributes: the browser would never run them. All code must
+// live in app.js and styles.css.
+func TestPageHasNoInlineCode(t *testing.T) {
+	page := readFile(t, "index.html")
+	src := regexp.MustCompile(`(?i)\ssrc\s*=`)
+	for _, tag := range regexp.MustCompile(`(?is)<(script|style)\b[^>]*>`).FindAllStringSubmatch(page, -1) {
+		if tag[1] == "style" || !src.MatchString(tag[0]) {
+			t.Errorf("inline %s: %s", tag[1], tag[0])
+		}
+	}
+	for _, attr := range regexp.MustCompile(`(?is)<[^>]*\s(on[a-z]+|style)\s*=`).FindAllStringSubmatch(page, -1) {
+		t.Errorf("inline %s attribute: %s", attr[1], attr[0])
+	}
+}
+
 func TestEntrypointInjectsThePublicConfiguration(t *testing.T) {
 	run := runEntrypoint(t, map[string]string{
 		"SIGNUP_CLIENT_ID": clientID,
