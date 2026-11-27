@@ -152,7 +152,7 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stages 1-4 are local or short Google API calls; bound them so a hung
+	// Stages 1-3 are local or short Google API calls; bound them so a hung
 	// upstream cannot pin the handler. Activation gets its own, longer budget.
 	verifyCtx, cancel := context.WithTimeout(r.Context(), verificationTimeout)
 	defer cancel()
@@ -177,7 +177,7 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Interim limitation: project ownership is NOT verified. Google
+	// Interim limitation: project ownership is NOT verified. Google
 	// Workspace app-access control blocks the cloud-platform.read-only scope in
 	// this org, so there is no user-authorized way to read the project's IAM
 	// policy. Only the verified Red Hat identity and the project ID syntax are
