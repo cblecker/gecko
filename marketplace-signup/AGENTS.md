@@ -11,6 +11,9 @@ SPA. It supplements the root `AGENTS.md`. Read `README.md` here first.
 - **Identity comes only from the verified ID token.** Do not read identity from
   the request body, headers or query. Keep the `hd` and email-domain agreement.
 - **Never log tokens.** The signer's email is logged on purpose, for audit.
+- **Log categories, not upstream text.** An error that reaches the logs carries
+  its category, HTTP status codes and the workflow execution's name, never a
+  response body or the workflow's message or stack trace.
 - **Notification is fire-and-forget.** One attempt per successful activation. It
   must never change the response, block it, or be retried. Keep the panic
   containment in the handler's goroutine.

@@ -138,7 +138,7 @@ func (c *Client) Activate(ctx context.Context, namespace, subject string) (Resul
 		case "SUCCEEDED":
 			return resultFromExecution(namespace, execution.Result)
 		case "FAILED", "CANCELLED":
-			return Result{}, classifyFailure(execution.Error)
+			return Result{}, classifyFailure(created.Name, execution.Error)
 		}
 
 		select {
@@ -157,8 +157,10 @@ type execution struct {
 	Error  *executionError `json:"error"`
 }
 
+// executionError keeps only the payload. Its context (a stack trace) and the
+// payload's message are free text from the workflow; the full error stays in
+// the execution's record.
 type executionError struct {
-	Context string          `json:"context"`
 	Payload json.RawMessage `json:"payload"`
 }
 
@@ -181,28 +183,36 @@ func resultFromExecution(namespace, rawResult string) (Result, error) {
 	return Result{Status: payload.Status, Namespace: payload.Namespace}, nil
 }
 
-// classifyFailure inspects the execution error payload. The workflow raises
-// either an object with a numeric code (reserved namespace, subject conflict)
-// or a plain string (input validation, infrastructure failures). The
-// Executions REST API returns payload as a JSON string containing JSON, so
-// both the raw payload and an outer-string-decoded form are tried.
-func classifyFailure(execErr *executionError) error {
-	if execErr == nil || len(execErr.Payload) == 0 {
-		return fmt.Errorf("%w: execution failed without an error payload", ErrTransient)
-	}
-	if err := classifyPayload(execErr.Payload); err != nil {
-		return err
-	}
-	// Executions API wire format: outer JSON string wrapping the workflow's JSON.
-	var outer string
-	if err := json.Unmarshal(execErr.Payload, &outer); err == nil {
-		if err := classifyPayload([]byte(outer)); err != nil {
-			return err
+// classifyFailure maps a failed or cancelled execution to an error category.
+// The workflow raises either an object with a numeric code (invalid input,
+// reserved namespace, subject conflict) or a plain string (input validation,
+// infrastructure failures). The Executions REST API returns payload as a JSON
+// string containing JSON, so both the raw payload and an outer-string-decoded
+// form are tried.
+//
+// The handler logs the returned error, so it names the execution, whose record
+// holds the workflow's full error, and never carries the workflow's message.
+func classifyFailure(execution string, execErr *executionError) error {
+	kind := ErrTransient
+	if execErr != nil && len(execErr.Payload) > 0 {
+		if k := classifyPayload(execErr.Payload); k != nil {
+			kind = k
+		} else {
+			// Executions API wire format: outer JSON string wrapping the workflow's JSON.
+			var outer string
+			if err := json.Unmarshal(execErr.Payload, &outer); err == nil {
+				if k := classifyPayload([]byte(outer)); k != nil {
+					kind = k
+				}
+			}
 		}
 	}
-	return fmt.Errorf("%w: execution failed: %s", ErrTransient, execErr.Context)
+	return fmt.Errorf("%w: execution %s", kind, execution)
 }
 
+// classifyPayload returns the category of a workflow error payload, or nil if
+// the backend does not recognize it. It reads the message only to recognize
+// today's input errors by their wording, and never returns it.
 func classifyPayload(raw []byte) error {
 	var obj struct {
 		Code    int    `json:"code"`
@@ -211,19 +221,19 @@ func classifyPayload(raw []byte) error {
 	if err := json.Unmarshal(raw, &obj); err == nil {
 		switch obj.Code {
 		case 400:
-			return fmt.Errorf("%w: %s", ErrInvalidInput, obj.Message)
+			return ErrInvalidInput
 		case 403:
-			return fmt.Errorf("%w: %s", ErrReservedName, obj.Message)
+			return ErrReservedName
 		case 409:
-			return fmt.Errorf("%w: %s", ErrAlreadyClaimed, obj.Message)
+			return ErrAlreadyClaimed
 		}
 		if isInputValidation(obj.Message) {
-			return fmt.Errorf("%w: %s", ErrInvalidInput, obj.Message)
+			return ErrInvalidInput
 		}
 	}
 	var msg string
 	if err := json.Unmarshal(raw, &msg); err == nil && isInputValidation(msg) {
-		return fmt.Errorf("%w: %s", ErrInvalidInput, msg)
+		return ErrInvalidInput
 	}
 	return nil
 }

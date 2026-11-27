@@ -115,59 +115,58 @@ func TestActivateAlreadyActive(t *testing.T) {
 }
 
 func TestActivateFailureMapping(t *testing.T) {
+	// The workflow's messages and the stack trace in an execution's context are
+	// free text from upstream. They classify the failure but never reach the
+	// error, which the handler logs; the error names the execution instead.
+	const trace = `RuntimeError in step "create_binding", routine "main", line: 115, subject alice@redhat.com`
+	failed := func(payload any) map[string]any {
+		return map[string]any{
+			"name": "e1", "state": "FAILED",
+			"error": map[string]any{"payload": payload, "context": trace},
+		}
+	}
 	tests := []struct {
-		name string
-		exec map[string]any
-		want error
+		name     string
+		exec     map[string]any
+		want     error
+		upstream string // the workflow's own text, which must not reach the error
 	}{
 		{
-			name: "reserved namespace",
-			exec: map[string]any{
-				"name": "e1", "state": "FAILED",
-				"error": map[string]any{"payload": map[string]any{"code": 403.0, "message": "reserved"}},
-			},
-			want: ErrReservedName,
+			name:     "reserved namespace",
+			exec:     failed(map[string]any{"code": 403.0, "message": "Project namespace is reserved and cannot be activated: kube-system"}),
+			want:     ErrReservedName,
+			upstream: "cannot be activated",
 		},
 		{
-			name: "subject conflict",
-			exec: map[string]any{
-				"name": "e1", "state": "FAILED",
-				"error": map[string]any{"payload": map[string]any{"code": 409.0, "message": "exists"}},
-			},
-			want: ErrAlreadyClaimed,
+			name:     "subject conflict",
+			exec:     failed(map[string]any{"code": 409.0, "message": "service-admin-rb already exists for a different subject"}),
+			want:     ErrAlreadyClaimed,
+			upstream: "service-admin-rb",
 		},
 		{
-			name: "input validation raise",
-			exec: map[string]any{
-				"name": "e1", "state": "FAILED",
-				"error": map[string]any{"payload": "Invalid project_namespace: expected a valid GCP project ID"},
-			},
-			want: ErrInvalidInput,
+			name:     "input validation raise",
+			exec:     failed("Invalid project_namespace: expected a valid GCP project ID"),
+			want:     ErrInvalidInput,
+			upstream: "Invalid project_namespace",
 		},
 		{
 			// Recognized by its code, whatever the wording.
-			name: "input validation raise with code 400",
-			exec: map[string]any{
-				"name": "e1", "state": "FAILED",
-				"error": map[string]any{"payload": map[string]any{"code": 400.0, "message": "project namespace is not a valid ID"}},
-			},
-			want: ErrInvalidInput,
+			name:     "input validation raise with code 400",
+			exec:     failed(map[string]any{"code": 400.0, "message": "project namespace is not a valid ID"}),
+			want:     ErrInvalidInput,
+			upstream: "not a valid ID",
 		},
 		{
-			name: "role unavailable is transient",
-			exec: map[string]any{
-				"name": "e1", "state": "FAILED",
-				"error": map[string]any{"payload": "PlatformRole service-admin is unavailable: timeout"},
-			},
-			want: ErrTransient,
+			name:     "role unavailable is transient",
+			exec:     failed("PlatformRole service-admin is unavailable: timeout"),
+			want:     ErrTransient,
+			upstream: "PlatformRole",
 		},
 		{
-			name: "gke error is transient",
-			exec: map[string]any{
-				"name": "e1", "state": "FAILED",
-				"error": map[string]any{"payload": "Failed to create service-admin binding: HTTP 500"},
-			},
-			want: ErrTransient,
+			name:     "gke error is transient",
+			exec:     failed("Failed to create service-admin binding: HTTP 500"),
+			want:     ErrTransient,
+			upstream: "Failed to create",
 		},
 		{
 			name: "no payload is transient",
@@ -186,6 +185,15 @@ func TestActivateFailureMapping(t *testing.T) {
 			_, err := c.Activate(context.Background(), "my-project-123", "alice@redhat.com")
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "projects/p/locations/r/executions/e1") {
+				t.Errorf("error %q does not name the execution", msg)
+			}
+			for _, text := range []string{tc.upstream, "RuntimeError", "alice@redhat.com"} {
+				if text != "" && strings.Contains(msg, text) {
+					t.Errorf("error %q carries the workflow's text %q", msg, text)
+				}
 			}
 		})
 	}
@@ -243,18 +251,18 @@ func TestClassifyFailureOuterStringPayload(t *testing.T) {
 	// Real Executions API wraps the workflow's JSON in an outer JSON string.
 	outer409 := marshal(t, map[string]any{"code": 409.0, "message": "exists"})
 	wrapped409 := marshal(t, string(outer409))
-	if err := classifyFailure(&executionError{Payload: wrapped409, Context: "failed"}); !errors.Is(err, ErrAlreadyClaimed) {
+	if err := classifyFailure("e1", &executionError{Payload: wrapped409}); !errors.Is(err, ErrAlreadyClaimed) {
 		t.Fatalf("wrapped 409: got %v, want ErrAlreadyClaimed", err)
 	}
 	outer403 := marshal(t, map[string]any{"code": 403.0, "message": "reserved"})
 	wrapped403 := marshal(t, string(outer403))
-	if err := classifyFailure(&executionError{Payload: wrapped403, Context: "failed"}); !errors.Is(err, ErrReservedName) {
+	if err := classifyFailure("e1", &executionError{Payload: wrapped403}); !errors.Is(err, ErrReservedName) {
 		t.Fatalf("wrapped 403: got %v, want ErrReservedName", err)
 	}
 	// The wire format for a plain-string payload is a single outer string
 	// containing the message; it classifies as input validation.
 	directWrapped := marshal(t, "Invalid project_namespace: bad")
-	if err := classifyFailure(&executionError{Payload: directWrapped, Context: "failed"}); !errors.Is(err, ErrInvalidInput) {
+	if err := classifyFailure("e1", &executionError{Payload: directWrapped}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("wrapped input validation: got %v, want ErrInvalidInput", err)
 	}
 }

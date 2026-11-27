@@ -85,6 +85,9 @@ input.
 
 - Persist tokens or any state: it has no database and no stored secrets.
 - Write tokens to logs. The signer's email is logged deliberately, for audit.
+- Log upstream error text. A failure is logged as its category, HTTP status
+  codes and the workflow execution's name, which locates the full error in the
+  execution's record.
 - Trust client-supplied identity: the email comes from the signed ID token.
 - Inspect the customer's project (see the limitation above).
 - Let a request choose the leader project, the notification destination or the
